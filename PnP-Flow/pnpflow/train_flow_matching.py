@@ -112,8 +112,12 @@ class FLOW_MATCHING(object):
                          rtol=1e-5,
                          method='dopri5',
                          )
+            # print(f"latent: {latent}")
+            # print(f"x: {x}")
             x = z_t[-1].detach()
-            x = torch.clamp(x, min=0.0, max=9/255.0)
+            x = torch.clamp(x, min=-1, max=1)
+            # print(f"x: {x}")
+        
         self.model.train()
         return x
     
@@ -144,17 +148,17 @@ class FLOW_MATCHING(object):
             os.makedirs(self.save_path + 'results_samplings/')
         except BaseException:
             pass
-        if self.args.dataset == 'arc_agi':
-            reco = utils.postprocess(self.apply_conditional_flow_matching(16, x), self.args)
-            reco = reco[:, :, :30, :60]
-        else:
-            reco = utils.postprocess(self.apply_flow_matching(16), self.args)
-            reco = reco[:, :, :30, :60]
+        # if self.args.dataset == 'arc_agi':
+        reco = utils.postprocess(self.apply_conditional_flow_matching(16, x), self.args)
+        reco = reco[:, :, :30, :60]
+        # else:
+        # reco = utils.postprocess(self.apply_flow_matching(16), self.args)
+        # reco = reco[:, :, :30, :60]
 
         
-        if self.args.dataset == 'arc_agi':
-            utils.save_samples_for_arc_agi(reco.detach().cpu(), x[:16].cpu(), self.save_path + 'results_samplings/' +
-                        'samplings_ep_{}.pdf'.format(ep), self.args)
+        # if self.args.dataset == 'arc_agi':
+        utils.save_samples_for_arc_agi(reco.detach().cpu(), x[:16].cpu(), self.save_path + 'results_samplings/' +
+                    'samplings_ep_{}.pdf'.format(ep), self.args)
         # else:
         # utils.save_samples(reco.detach().cpu(), x[:16].cpu(), self.save_path + 'results_samplings/' +
                     # 'samplings_ep_{}.pdf'.format(ep), self.args)

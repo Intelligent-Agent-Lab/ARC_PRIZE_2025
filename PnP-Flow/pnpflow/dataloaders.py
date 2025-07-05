@@ -290,8 +290,10 @@ def preprocess_data(challenges):
     # Pad inputs to max_input_shape
     padded_inputs = [np.pad(input, [(0, max_input_shape[0] - input.shape[0]), (0, max_input_shape[1] - input.shape[1])], mode='constant', constant_values=0) for input in inputs]
     padded_outputs = [np.pad(output, [(0, max_output_shape[0] - output.shape[0]), (0, max_output_shape[1] - output.shape[1])], mode='constant', constant_values=0) for output in outputs]
-    padded_inputs = (np.array(padded_inputs).astype(np.float32) / 255.0)
-    padded_outputs = (np.array(padded_outputs).astype(np.float32) / 255.0)
+    # padded_inputs = (np.array(padded_inputs).astype(np.float32) / 127.5) - 1
+    # padded_outputs = (np.array(padded_outputs).astype(np.float32) / 127.5) - 1
+    padded_inputs = (np.array(padded_inputs).astype(np.float32) / 4.5) - 1
+    padded_outputs = (np.array(padded_outputs).astype(np.float32) / 4.5) - 1
     return padded_inputs, padded_outputs
 
 

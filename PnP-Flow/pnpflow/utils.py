@@ -400,8 +400,8 @@ def save_samples_for_arc_agi(samples, train_samples, path, args):
     print(f"save_samples_for_arc_agi")
     samples = samples.clone().permute(0, 2, 3, 1).cpu().data.numpy()
     train_samples = train_samples.clone().permute(0, 2, 3, 1).cpu().data.numpy()
-    samples = samples * 255
-    train_samples = train_samples * 255
+    samples = (samples + 1) * 4.5
+    train_samples = (train_samples + 1) * 4.5
     samples = samples.astype(int)
     train_samples = train_samples.astype(int)
     batch_samples_size = samples.shape[0]
@@ -428,7 +428,6 @@ def save_samples_for_arc_agi(samples, train_samples, path, args):
             grid_array = grid_array.squeeze()
             # print(f'grid_array: {grid_array}')
             # print(f'grid_array.shape: {grid_array.shape}')
-            
             color_grid = np.array([[colors[val] for val in row] for row in grid_array])
             for v in range(grid_array.shape[0]):
                 for w in range(grid_array.shape[1]):
@@ -466,8 +465,8 @@ def save_samples_for_arc_agi(samples, train_samples, path, args):
 def save_samples(samples, train_samples, path, args):
     samples = samples.clone().permute(0, 2, 3, 1).cpu().data.numpy()
     train_samples = train_samples.clone().permute(0, 2, 3, 1).cpu().data.numpy()
-    samples = samples * 255
-    train_samples = train_samples * 255
+    samples = (samples + 1) * 127.5
+    train_samples = (train_samples + 1) * 127.5
     samples = samples.astype(int)
     train_samples = train_samples.astype(int)
     
