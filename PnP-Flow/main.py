@@ -31,6 +31,7 @@ def parse_args() -> argparse.Namespace:
     cfg = load_cfg_from_cfg_file('./' + 'config/main_config.yaml')
     parser.add_argument('--opts', default=None, nargs=argparse.REMAINDER)
     args = parser.parse_args()
+    print(args)
     if args.opts is not None:
         cfg = merge_cfg_from_list(cfg, args.opts)
 
@@ -85,7 +86,6 @@ def main():
         print('Training done!')
 
     if args.eval:
-
         if args.model == "ot" or args.model == "gradient_step":
             model_path = args.root + \
                 'model/{}/{}/model_final.pt'.format(
@@ -135,6 +135,7 @@ def main():
                 half_size_mask = 40
             if args.dataset == 'arg_agi':
                 degradation = RightBoxInpainting
+                print("rightbox inpainting")
             else:
                 degradation = BoxInpainting(half_size_mask)
 

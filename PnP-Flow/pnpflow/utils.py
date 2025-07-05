@@ -400,7 +400,10 @@ def save_samples_for_arc_agi(samples, train_samples, path, args):
     print(f"save_samples_for_arc_agi")
     samples = samples.clone().permute(0, 2, 3, 1).cpu().data.numpy()
     train_samples = train_samples.clone().permute(0, 2, 3, 1).cpu().data.numpy()
-
+    samples = samples * 255
+    train_samples = train_samples * 255
+    samples = samples.astype(int)
+    train_samples = train_samples.astype(int)
     batch_samples_size = samples.shape[0]
     # 색상 매핑: 0은 연한 회색, 나머지 1~9는 컬러맵으로 지정
     colors = [
@@ -423,8 +426,8 @@ def save_samples_for_arc_agi(samples, train_samples, path, args):
         for j in range(cols):
             grid_array = samples[i + j * rows]
             grid_array = grid_array.squeeze()
-            print(f'grid_array: {grid_array}')
-            print(f'grid_array.shape: {grid_array.shape}')
+            # print(f'grid_array: {grid_array}')
+            # print(f'grid_array.shape: {grid_array.shape}')
             
             color_grid = np.array([[colors[val] for val in row] for row in grid_array])
             for v in range(grid_array.shape[0]):
@@ -434,7 +437,21 @@ def save_samples_for_arc_agi(samples, train_samples, path, args):
             ax[i, j].set_ylim(0, grid_array.shape[0])
             ax[i, j].set_aspect('equal')
             ax[i, j].axis('off')
-
+    
+    for i in range(rows):
+        for j in range(cols, 2*cols+1):
+            if i+(j - cols)*rows < train_samples.shape[0]:
+                grid_array = train_samples[i+(j - cols)*rows]
+                grid_array = grid_array.squeeze()
+                color_grid = np.array([[colors[val] for val in row] for row in grid_array])
+                for v in range(grid_array.shape[0]):
+                    for w in range(grid_array.shape[1]):
+                        ax[i, j].add_patch(plt.Rectangle((w, grid_array.shape[0] - v - 1), 1, 1, color=color_grid[v, w]))
+                ax[i, j].set_xlim(0, grid_array.shape[1])
+                ax[i, j].set_ylim(0, grid_array.shape[0])
+                ax[i, j].set_aspect('equal')
+                ax[i, j].axis('off')
+    
     ax[0, 0].set_title("Model samples")
     ax[0, cols].set_title("Training samples")
 
@@ -1133,14 +1150,14 @@ def arnoldi(vec,    # Matrix vector product
 
 
 def cal_rotation(a, b):
-    '''
-    Args:
-        a: element h in position j
-        b: element h in position j+1
-    Returns:
-        cosine = a / \sqrt{a^2 + b^2}
-        sine = - b / \sqrt{a^2 + b^2}
-    '''
+    # '''
+    # Args:
+    #     a: element h in position j
+    #     b: element h in position j+1
+    # Returns:
+    #     cosine = a / \sqrt{a^2 + b^2}
+    #     sine = - b / \sqrt{a^2 + b^2}
+    # '''
     c = torch.sqrt(a * a + b * b)
     return a / c, - b / c
 

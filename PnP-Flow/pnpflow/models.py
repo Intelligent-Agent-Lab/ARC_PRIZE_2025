@@ -484,6 +484,7 @@ class UNet(nn.Module):
     
         # 슬라이싱을 이용해 h를 잘라냅니다.
         h = h[:, :, diff_y:(diff_y + x_height), diff_x:(diff_x + x_width)]
+        h = torch.clamp(h, min=0.0, max=9/255.0)
         # print(f'h.shape: {h.shape}')
         # print(f'x.shape: {x.shape}')
         assert list(h.size()) == [x.size(

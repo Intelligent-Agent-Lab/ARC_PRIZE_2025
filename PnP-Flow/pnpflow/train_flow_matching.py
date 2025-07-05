@@ -113,6 +113,7 @@ class FLOW_MATCHING(object):
                          method='dopri5',
                          )
             x = z_t[-1].detach()
+            x = torch.clamp(x, min=0.0, max=9/255.0)
         self.model.train()
         return x
     
@@ -151,12 +152,12 @@ class FLOW_MATCHING(object):
             reco = reco[:, :, :30, :60]
 
         
-        # if self.args.dataset == 'arc_agi':
-            # utils.save_samples_for_arc_agi(reco.detach().cpu(), x[:16].cpu(), self.save_path + 'results_samplings/' +
-        #                 'samplings_ep_{}.pdf'.format(ep), self.args)
+        if self.args.dataset == 'arc_agi':
+            utils.save_samples_for_arc_agi(reco.detach().cpu(), x[:16].cpu(), self.save_path + 'results_samplings/' +
+                        'samplings_ep_{}.pdf'.format(ep), self.args)
         # else:
-        utils.save_samples(reco.detach().cpu(), x[:16].cpu(), self.save_path + 'results_samplings/' +
-                    'samplings_ep_{}.pdf'.format(ep), self.args)
+        # utils.save_samples(reco.detach().cpu(), x[:16].cpu(), self.save_path + 'results_samplings/' +
+                    # 'samplings_ep_{}.pdf'.format(ep), self.args)
 
         # check the plots by saving training samples
         # if ep == 0:
