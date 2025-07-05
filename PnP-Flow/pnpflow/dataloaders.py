@@ -305,7 +305,7 @@ class ARCAGIDataset:
         self.X, self.Y = preprocess_data(data)
         self.X = torch.tensor(self.X)
         self.Y = torch.tensor(self.Y)
-        self.X = self.Y.unsqueeze(1)
+        self.X = self.X.unsqueeze(1)
         self.Y = self.Y.unsqueeze(1)
 
     def __len__(self):

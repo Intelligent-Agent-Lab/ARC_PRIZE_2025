@@ -396,6 +396,95 @@ def bicubic_filter(factor=2):
     return torch.Tensor(w).unsqueeze(0).unsqueeze(0)
 
 
+# def save_samples_for_arc_agi(samples, train_samples, path, args):
+#     print(f"save_samples_for_arc_agi")
+
+#     # 데이터 전처리 (원래 코드와 동일)
+#     samples = samples.clone().permute(0, 2, 3, 1).cpu().data.numpy()
+#     train_samples = train_samples.clone().permute(0, 2, 3, 1).cpu().data.numpy()
+#     samples = (samples + 1) * 4.5
+#     train_samples = (train_samples + 1) * 4.5
+#     samples = samples.astype(int)
+#     train_samples = train_samples.astype(int)
+
+#     batch_samples_size = samples.shape[0]
+
+#     # Matplotlib 컬러맵 생성 (개선된 부분)
+#     # 0부터 9까지의 값에 대응하는 컬러맵을 직접 생성합니다.
+#     # ListedColormap을 사용하면 특정 값에 특정 색상을 매핑할 수 있습니다.
+#     from matplotlib.colors import ListedColormap
+    
+#     # 0: 연한 회색 (D3D3D3)
+#     # 1: 분홍 (FF9999)
+#     # 2: 파랑 (66B2FF)
+#     # 3: 연두 (99FF99)
+#     # 4: 주황 (FFCC66)
+#     # 5: 보라 (CC99FF)
+#     # 6: 빨강 (FF6666)
+#     # 7: 초록 (669966)
+#     # 8: 회보라 (9999CC)
+#     # 9: 노랑 (FFFF66)
+    
+#     # Matplotlib은 0-1 사이의 RGB 값을 기대하므로 255로 나눕니다.
+#     # 각 색상의 튜플을 (R, G, B) 또는 (R, G, B, A) 형태로 만듭니다.
+#     colors_rgb = [
+#         (211/255, 211/255, 211/255),  # D3D3D3
+#         (255/255, 153/255, 153/255),  # FF9999
+#         (102/255, 178/255, 255/255),  # 66B2FF
+#         (153/255, 255/255, 153/255),  # 99FF99
+#         (255/255, 204/255, 102/255),  # FFCC66
+#         (204/255, 153/255, 255/255),  # CC99FF
+#         (255/255, 102/255, 102/255),  # FF6666
+#         (102/255, 153/255, 102/255),  # 669966
+#         (153/255, 153/255, 204/255),  # 9999CC
+#         (255/255, 255/255, 102/255),  # FFFF66
+#     ]
+#     cmap = ListedColormap(colors_rgb)
+
+#     cols = int(math.sqrt(batch_samples_size))
+#     rows = int(batch_samples_size / cols)
+
+#     fig, ax = plt.subplots(rows, 2 * cols, figsize=(20, 20))
+#     # ax가 1차원 배열인 경우를 대비하여 flatten
+#     ax = ax.flatten()
+
+#     # samples 처리 (개선된 부분)
+#     for k in range(batch_samples_size):
+#         grid_array = samples[k].squeeze()
+#         # imshow를 사용하여 2D 배열을 직접 그립니다.
+#         # origin='lower'는 Matplotlib의 기본 이미지 원점이 왼쪽 위이므로
+#         # ARC-AGI처럼 왼쪽 아래를 (0,0)으로 맞추기 위함입니다.
+#         ax[k].imshow(grid_array, cmap=cmap, vmin=0, vmax=9, origin='lower')
+#         ax[k].set_aspect('equal')
+#         ax[k].axis('off')
+
+#     # train_samples 처리 (개선된 부분)
+#     for k in range(train_samples.shape[0]):
+#         # train_samples는 samples 옆에 배치되므로 인덱스를 조정합니다.
+#         grid_array = train_samples[k].squeeze()
+#         ax[batch_samples_size + k].imshow(grid_array, cmap=cmap, vmin=0, vmax=9, origin='lower')
+#         ax[batch_samples_size + k].set_aspect('equal')
+#         ax[batch_samples_size + k].axis('off')
+
+#     # 제목 설정
+#     # ax가 flatten되어 있으므로, 직접 접근해야 합니다.
+#     # 첫 번째 samples 이미지의 제목 (맨 왼쪽 위)
+#     if batch_samples_size > 0:
+#         ax[0].set_title("Model samples")
+#     # 첫 번째 train_samples 이미지의 제목 (samples 섹션 바로 옆)
+#     if train_samples.shape[0] > 0:
+#         ax[cols].set_title("Training samples") # 원래 코드의 위치를 고려하여 cols번째 ax에 설정
+
+#     # 모든 서브플롯의 눈금 제거 (원래 코드와 동일)
+#     for ax_ in ax:
+#         ax_.set_xticks([])
+#         ax_.set_yticks([])
+
+#     plt.tight_layout()
+#     plt.savefig(path)
+#     plt.close(fig)
+    
+
 def save_samples_for_arc_agi(samples, train_samples, path, args):
     print(f"save_samples_for_arc_agi")
     samples = samples.clone().permute(0, 2, 3, 1).cpu().data.numpy()

@@ -304,7 +304,7 @@ class UNet(nn.Module):
                  input_height,
                  ch,
                  output_channels=None,
-                 ch_mult=(1, 2, 4, 8),
+                 ch_mult=(1, 2, 4,),
                  num_res_blocks=2,
                  dropout=0.,
                  resamp_with_conv=True,

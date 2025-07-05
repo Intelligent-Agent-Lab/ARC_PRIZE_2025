@@ -84,6 +84,7 @@ class FLOW_MATCHING(object):
                         f'Epoch: {ep}, iter: {iteration}, Loss: {loss.item()}\n')
 
             # save samples, plot them, and compute FID on small dataset
+            # if ep % 2 == 0 and ep != 0:
             self.sample_plot(x, ep)
             if ep % 5 == 0:
                 # save model
