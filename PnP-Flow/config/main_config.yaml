@@ -1,0 +1,23 @@
+EVAL:
+    dataset: 'arc_agi'                # dataset name (mnist, celeba, celeba_hq, afhq_cat, arc_agi)
+    model: 'ot'             #model (ot, rectified)
+    root: './'                      # root directory for the experiment
+    seed: 0                         # random seed
+    batch_size_train: 32               # batch size for training
+    num_epoch: 100                  # number of epochs for training
+    lr: 0.0001                      # learning rate for training
+    train: False                    # train the flow model if True
+    lipschitz_constraint: None     # soft constraint on the spectral norm of the Jacobian
+    finetune: False                 # finetuning of the model
+    eval: True                      # evaluate the flow model if True
+    eval_split: 'test'               # data used for evaluation (val, test)
+    compute_metrics: False           # compute scores (FID, SW, Vendi) if True
+    compute_lipschitz: False
+    problem: 'inpainting'      # inverse problem type (superresolution, inpainting, denoising)
+    method: 'pnp_flow'              # method for solving inverse problem (pnp_flow, map_gd, d_flow)
+    max_batch: 1               # number of batches of size 4 for evaluation
+    batch_size_ip : 4
+    noise_type: 'gaussian'          # noise type for inverse problem (gaussian, poisson))
+    compute_memory: False
+    compute_time: False
+    save_results: True
