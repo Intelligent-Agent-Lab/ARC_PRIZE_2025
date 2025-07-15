@@ -83,7 +83,7 @@ class FLOW_MATCHING(object):
                 with open(self.save_path + 'loss_training.txt', 'a') as file:
                     file.write(
                         f'Epoch: {ep}, iter: {iteration}, Loss: {loss.item()}\n')
-
+                break
             # save samples, plot them, and compute FID on small dataset
             # if ep % 2 == 0 and ep != 0:
             if ep % 25 == 0:
@@ -105,7 +105,7 @@ class FLOW_MATCHING(object):
                 NO_samples,
                 self.num_channels,
                 self.d,
-                self.d*2,
+                self.d*6,
                 device=self.device,
                 requires_grad=False)
             latent[:NO_samples, :, 0:30, 0:180] = x[:NO_samples, :, 0:30, 0:180]
