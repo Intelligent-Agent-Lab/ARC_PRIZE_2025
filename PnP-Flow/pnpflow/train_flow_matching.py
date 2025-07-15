@@ -50,7 +50,7 @@ class FLOW_MATCHING(object):
                     self.d*6,
                     device=self.device,
                     requires_grad=False)
-                z[:, :, 0:30, 0:180] = x[:, :, 0:30, 0:180]
+                z[:, :, 0:30, 0:150] = x[:, :, 0:30, 0:150]
                 z.requires_grad = True
                 
                 # print(f"train_FM_model. x.shape: {x.shape}")
@@ -83,7 +83,6 @@ class FLOW_MATCHING(object):
                 with open(self.save_path + 'loss_training.txt', 'a') as file:
                     file.write(
                         f'Epoch: {ep}, iter: {iteration}, Loss: {loss.item()}\n')
-                break
             # save samples, plot them, and compute FID on small dataset
             # if ep % 2 == 0 and ep != 0:
             if ep % 25 == 0:
@@ -108,7 +107,7 @@ class FLOW_MATCHING(object):
                 self.d*6,
                 device=self.device,
                 requires_grad=False)
-            latent[:NO_samples, :, 0:30, 0:180] = x[:NO_samples, :, 0:30, 0:180]
+            latent[:NO_samples, :, 0:30, 0:150] = x[:NO_samples, :, 0:30, 0:150]
             z_t = odeint(model_class, latent,
                          torch.tensor([0.0, 1.0]).to(self.device),
                          atol=1e-5,
