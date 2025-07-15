@@ -43,14 +43,14 @@ class FLOW_MATCHING(object):
                 if x.size(0) == 0:
                     continue
                 x = x.to(self.device)
-                z = torch.randn(
+                z = torch.zeros(
                     x.shape[0],
                     self.num_channels,
                     self.d,
-                    self.d*2,
+                    self.d*6,
                     device=self.device,
                     requires_grad=False)
-                z[:, :, 0:30, 0:30] = x[:, :, 0:30, 0:30]
+                z[:, :, 0:30, 0:180] = x[:, :, 0:30, 0:180]
                 z.requires_grad = True
                 
                 # print(f"train_FM_model. x.shape: {x.shape}")
@@ -77,6 +77,7 @@ class FLOW_MATCHING(object):
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
+                print(f"epoch: {ep}. {iteration}/{len(train_loader)}, loss: {loss.item()}")
 
                 # save loss in txt file
                 with open(self.save_path + 'loss_training.txt', 'a') as file:
@@ -85,7 +86,8 @@ class FLOW_MATCHING(object):
 
             # save samples, plot them, and compute FID on small dataset
             # if ep % 2 == 0 and ep != 0:
-            self.sample_plot(x, ep)
+            if ep % 25 == 0:
+                self.sample_plot(x, ep)
             if ep % 5 == 0:
                 # save model
                 torch.save(self.model.state_dict(),
@@ -99,14 +101,14 @@ class FLOW_MATCHING(object):
         self.model.eval()
         with torch.no_grad():
             model_class = cnf(self.model)
-            latent = torch.randn(
+            latent = torch.zeros(
                 NO_samples,
                 self.num_channels,
                 self.d,
                 self.d*2,
                 device=self.device,
                 requires_grad=False)
-            latent[:NO_samples, :, 0:30, 0:30] = x[:NO_samples, :, 0:30, 0:30]
+            latent[:NO_samples, :, 0:30, 0:180] = x[:NO_samples, :, 0:30, 0:180]
             z_t = odeint(model_class, latent,
                          torch.tensor([0.0, 1.0]).to(self.device),
                          atol=1e-5,
@@ -130,7 +132,7 @@ class FLOW_MATCHING(object):
                 NO_samples,
                 self.num_channels,
                 self.d,
-                self.d*2,
+                self.d*6,
                 device=self.device,
                 requires_grad=False)
             z_t = odeint(model_class, latent,
@@ -151,7 +153,7 @@ class FLOW_MATCHING(object):
             pass
         # if self.args.dataset == 'arc_agi':
         reco = utils.postprocess(self.apply_conditional_flow_matching(16, x), self.args)
-        reco = reco[:, :, :30, :60]
+        reco = reco[:, :, :30, :180]
         # else:
         # reco = utils.postprocess(self.apply_flow_matching(16), self.args)
         # reco = reco[:, :, :30, :60]

@@ -3,9 +3,9 @@ EVAL:
     model: 'ot'             #model (ot, rectified)
     root: './'                      # root directory for the experiment
     seed: 0                         # random seed
-    batch_size_train: 32               # batch size for training
+    batch_size_train: 64            # batch size for training
     num_epoch: 100                  # number of epochs for training
-    lr: 0.0001                      # learning rate for training
+    lr: 0.0001                   # learning rate for training
     train: False                    # train the flow model if True
     lipschitz_constraint: None     # soft constraint on the spectral norm of the Jacobian
     finetune: False                 # finetuning of the model
