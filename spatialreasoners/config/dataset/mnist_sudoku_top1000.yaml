@@ -1,0 +1,6 @@
+name: mnist_sudoku_lazy
+root: ./datasets/mnist_sudoku/
+data_shape: [1, 252, 252] # Greyscale
+subset_size: null
+top_n: 1000
+augment: false
