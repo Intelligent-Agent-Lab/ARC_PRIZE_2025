@@ -1,0 +1,6 @@
+name: arc_agi
+root: /home/kukjin/Projects/ARC_PRIZE_2025/spatialreasoners/datasets/arc_agi
+data_shape: [1, 30, 180]
+# subset_size: null
+# augment: false
+# grayscale: true

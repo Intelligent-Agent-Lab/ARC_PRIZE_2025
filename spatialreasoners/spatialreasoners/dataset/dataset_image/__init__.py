@@ -12,6 +12,7 @@ from .dataset_counting_polygons import (
 from .dataset_even_pixels import DatasetEvenPixels, DatasetEvenPixelsCfg
 from .dataset_ffhq import DatasetFFHQ, DatasetFFHQCfg
 from .dataset_grid import DatasetGrid
+from .dataset_arc_agi import DatasetARCAGI, DatasetARCAGICfg
 
 from .dataset_imagenet import DatasetImageNet, DatasetImageNetCfg
 from .dataset_mnist import DatasetMnist, DatasetMnistCfg
@@ -31,5 +32,6 @@ __all__ = [
     "DatasetGrid",
     "DatasetImageNet", "DatasetImageNetCfg",
     "DatasetMnist", "DatasetMnistCfg",
+    "DatasetARCAGI", "DatasetARCAGICfg",
     "DatasetMnistSudoku9x9Lazy", "DatasetMnistSudoku9x9LazyCfg",
 ]
