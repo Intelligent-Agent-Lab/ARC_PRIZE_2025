@@ -18,7 +18,7 @@ train:
 
 hydra:
   run:
-    dir: ""   # override!
+    dir: "saved_models/2508121157"   # Custom model save directory
 
 wandb:
   project: arc
@@ -49,8 +49,8 @@ data_loader:
 checkpointing:
   load: null #/BS/var-training/work/afm/outputs/realestate10k/2025-05-26_01-27-50/checkpoints/reference.ckpt # null
   resume: true
-  save: false
-  every_n_train_steps: 3500
+  save: true
+  every_n_train_steps: 3000
   every_n_train_steps_persistently: 50_000
   save_top_k: null
 

@@ -1,6 +1,7 @@
 defaults:
   - dit
 
+name: dit
 block:
   attention:
     num_heads: 16
