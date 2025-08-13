@@ -417,3 +417,17 @@ for t in range(900):
 env.plot_current_grid()
 print(total_reward)
 # %%
+obs, info = env.reset(seed=12,
+                        mode='train',
+                        # task_id='8dab14c2',
+                        reset_sol_grid='random')
+test_sol = env._target_grid_seq[18900:]
+total_reward = 0
+for t in range(900):
+    action = env.action_space.sample()
+    next_obs, reward, terminated, trucated, info = env.step(action)
+    total_reward += reward
+    print(reward)
+env.plot_current_grid()
+print(total_reward)
+# %%
