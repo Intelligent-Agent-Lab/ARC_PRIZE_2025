@@ -1,4 +1,6 @@
 # %%
+import gymnasium as gym 
+
 from arc_agi_grid_env import ArcAgiGridEnv
 
 # %%

@@ -227,8 +227,8 @@ class ArcAgiGridEnv(gym.Env):
         # Dict space gives us structured, human-readable observations
         self.observation_space = gym.spaces.Dict(
             {
-                "grid_img": gym.spaces.Box(low=0, high=10, shape=(30,180), dtype=int),
-                "grid_seq": gym.spaces.Box(low=0, high=10, shape=(5400,), dtype=int),
+                "current_grid_img": gym.spaces.Box(low=0, high=10, shape=(30,180), dtype=int),
+                "current_grid_seq": gym.spaces.Box(low=0, high=10, shape=(5400,), dtype=int),
             }
         )
         # action space에 대한 정의 (0~9 색상, 10: 마스크)
