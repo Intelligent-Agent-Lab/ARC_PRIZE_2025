@@ -4,14 +4,12 @@ import numpy as np
 import gymnasium as gym
 from itertools import permutations, product
 import json
-from typing import Tuple, Dict, Union, List
+from typing import Tuple, Dict, Union, List, Any
 import numpy as np
 from matplotlib import colors
 import matplotlib.pyplot as plt
 import random
 from matplotlib.colors import ListedColormap, Normalize
-import plotly.graph_objects as go
-import plotly.express as px
 
 cmap = colors.ListedColormap(
     ['#000000', # 0: black
@@ -29,67 +27,175 @@ cmap = colors.ListedColormap(
 norm = colors.Normalize(vmin=0, vmax=10)
 
 
-def preprocess_data(challenges,
-                    solutions
-                    ) -> Tuple[Dict, Dict]:
-    # TODO 1: Padding 수행
-    # TODO 2: train_pairs, test_pair 합쳐서 30x660 이미지 데이터 만들기
-    # TODO 3: 30 x 660 데이터 30x30 단위로 flatten 해서 19800 시퀀스 만들기
-    # TODO 4: 이미지, 시퀀스 데이터들 리턴
+def preprocess_data(challenges: Dict[str, Any], solutions: Dict[str, Any]) -> Tuple[Dict[str, List], Dict[str, List]]:
+    """
+    Optimized preprocessing function for ARC AGI 2 dataset.
+    
+    Args:
+        challenges: Dictionary containing challenge data
+        solutions: Dictionary containing solution data
+        
+    Returns:
+        Tuple of (dict_XYXYXY_img_pairs, dict_XYXYXY_seq_pairs)
+    """
+    MAX_SHAPE = (30, 30)
+    PAD_VAL = 10
+    
+    dict_XYXYXY_img_pairs = {}
+    dict_XYXYXY_seq_pairs = {}
+    
+    # Process each task
+    for task_id, task_data in challenges.items():
+        task_sol = solutions[task_id]
+        
+        # Process training pairs
+        train_pairs_img, train_pairs_seq = _process_pairs(
+            task_data.get('train', []), 
+            MAX_SHAPE, 
+            PAD_VAL
+        )
+        
+        # Process test pairs
+        test_inputs = task_data.get('test', [])
+        test_pairs_img, test_pairs_seq = _process_test_pairs(
+            test_inputs, 
+            task_sol, 
+            MAX_SHAPE, 
+            PAD_VAL
+        )
+        
+        # Generate XYXYXY pairs efficiently
+        dict_XYXYXY_img_pairs[task_id] = _generate_xyxyxy_pairs(
+            train_pairs_img, test_pairs_img, is_sequence=False
+        )
+        
+        dict_XYXYXY_seq_pairs[task_id] = _generate_xyxyxy_pairs(
+            train_pairs_seq, test_pairs_seq, is_sequence=True
+        )
+    
+    return dict_XYXYXY_img_pairs, dict_XYXYXY_seq_pairs
 
-    max_input_shape = (30, 30)
-    max_output_shape = (30, 30)
-    pad_val = 10
-    task_img_dict = dict()
-    task_seq_dict = dict()
 
-    for (task_id, task_data), (task_id, task_sol) in zip(challenges.items(), solutions.items()):
-        # task 내의 train pair 들의 최대 개수는 10
-        train_task_img_pairs = []
-        train_task_seq_pairs = []
-        for pair in task_data.get('train', []):
-            input_grid = np.array(pair['input'])
-            output_grid = np.array(pair['output'])
-            # Append input and output grids to the respective lists
-            padded_input = np.pad(input_grid, [(0, max_input_shape[0] - input_grid.shape[0]), (0, max_input_shape[1] - input_grid.shape[1])], mode='constant', constant_values=pad_val)
-            padded_output = np.pad(output_grid, [(0, max_output_shape[0] - output_grid.shape[0]), (0, max_output_shape[1] - output_grid.shape[1])], mode='constant', constant_values=pad_val)
-            img_XY = np.concatenate([padded_input, padded_output], axis=-1)
-            train_task_img_pairs.append(img_XY)
-            seq_input = padded_input.flatten()
-            seq_output = padded_output.flatten()
-            seq_XY = np.concatenate([seq_input, seq_output], axis=-1)
-            train_task_seq_pairs.append(seq_XY)
-        if len(train_task_img_pairs) < 10:
-            dummy_img = pad_val * np.ones([30, 60])
-            dummy_seq = pad_val * np.ones([30 * 60,])
-            while len(train_task_img_pairs) < 10:
-                train_task_img_pairs.append(dummy_img)
-                train_task_seq_pairs.append(dummy_seq)
-        ary_train_img_pairs = np.hstack(train_task_img_pairs)
-        ary_train_seq_pairs = np.concatenate(train_task_seq_pairs)
-        test_task_img_pairs = []
-        test_task_seq_pairs = []
-        for test_pair, test_sol in zip(task_data.get('test', []), task_sol):
-            input_grid = np.array(test_pair['input'])
-            output_grid = np.array(test_sol)
-            padded_input = np.pad(input_grid, [(0, max_input_shape[0] - input_grid.shape[0]), (0, max_input_shape[1] - input_grid.shape[1])], mode='constant', constant_values=pad_val)
-            padded_output = np.pad(output_grid, [(0, max_output_shape[0] - output_grid.shape[0]), (0, max_output_shape[1] - output_grid.shape[1])], mode='constant', constant_values=pad_val)
-            img_XY = np.concatenate([padded_input, padded_output], axis=-1)
-            test_task_img_pairs.append(img_XY)
-            seq_input = padded_input.flatten()
-            seq_output = padded_output.flatten()
-            seq_XY = np.concatenate([seq_input, seq_output], axis=-1)
-            test_task_seq_pairs.append(seq_XY)
-        train_test_img_pair_list = []
-        train_test_seq_pair_list = []
-        for (test_img_pair, train_seq_pair) in zip(test_task_img_pairs, test_task_seq_pairs):
-            train_test_img_pair = np.hstack([ary_train_img_pairs, np.array(test_img_pair)])
-            train_test_img_pair_list.append(train_test_img_pair)
-            train_test_seq_pair= np.concatenate([ary_train_seq_pairs, np.array(train_seq_pair)])
-            train_test_seq_pair_list.append(train_test_seq_pair)
-        task_img_dict[task_id] = train_test_img_pair_list
-        task_seq_dict[task_id] =train_test_seq_pair_list
-    return task_img_dict, task_seq_dict
+def _pad_grid(grid: np.ndarray, target_shape: Tuple[int, int], pad_val: int) -> np.ndarray:
+    """Efficiently pad a grid to target shape."""
+    pad_height = max(0, target_shape[0] - grid.shape[0])
+    pad_width = max(0, target_shape[1] - grid.shape[1])
+    
+    if pad_height == 0 and pad_width == 0:
+        return grid
+        
+    return np.pad(grid, [(0, pad_height), (0, pad_width)], 
+                  mode='constant', constant_values=pad_val)
+
+
+def _process_pairs(pairs: List[Dict], max_shape: Tuple[int, int], pad_val: int) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+    """Process input-output pairs into both image and sequence formats."""
+    img_pairs = []
+    seq_pairs = []
+    
+    for pair in pairs:
+        input_grid = np.array(pair['input'])
+        output_grid = np.array(pair['output'])
+        
+        # Pad grids
+        padded_input = _pad_grid(input_grid, max_shape, pad_val)
+        padded_output = _pad_grid(output_grid, max_shape, pad_val)
+        
+        # Image format: concatenate along width (axis=1)
+        xy_img = np.concatenate([padded_input, padded_output], axis=1)
+        img_pairs.append(xy_img)
+        
+        # Sequence format: flatten and concatenate
+        seq_input = padded_input.flatten()
+        seq_output = padded_output.flatten()
+        xy_seq = np.concatenate([seq_input, seq_output])
+        seq_pairs.append(xy_seq)
+    
+    return img_pairs, seq_pairs
+
+
+def _process_test_pairs(test_inputs: List[Dict], solutions: List, max_shape: Tuple[int, int], pad_val: int) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+    """Process test pairs with their solutions."""
+    img_pairs = []
+    seq_pairs = []
+    
+    for test_input, solution in zip(test_inputs, solutions):
+        input_grid = np.array(test_input['input'])
+        output_grid = np.array(solution)
+        
+        # Pad grids
+        padded_input = _pad_grid(input_grid, max_shape, pad_val)
+        padded_output = _pad_grid(output_grid, max_shape, pad_val)
+        
+        # Image format
+        xy_img = np.concatenate([padded_input, padded_output], axis=1)
+        img_pairs.append(xy_img)
+        
+        # Sequence format
+        seq_input = padded_input.flatten()
+        seq_output = padded_output.flatten()
+        xy_seq = np.concatenate([seq_input, seq_output])
+        seq_pairs.append(xy_seq)
+    
+    return img_pairs, seq_pairs
+
+
+def _generate_xyxyxy_pairs(train_pairs: List[np.ndarray], test_pairs: List[np.ndarray], is_sequence: bool) -> List[np.ndarray]:
+    """Generate XYXYXY pairs from training and test data."""
+    if not train_pairs or not test_pairs:
+        return []
+    
+    # Generate all training pair permutations (XYXY format)
+    train_xyxy_pairs = []
+    for p in permutations(train_pairs, 2):
+        if is_sequence:
+            xyxy_pair = np.concatenate(p)
+        else:
+            xyxy_pair = np.hstack(p)
+        train_xyxy_pairs.append(xyxy_pair)
+    
+    # Generate XYXYXY combinations
+    xyxyxy_pairs = []
+    for train_pair, test_pair in product(train_xyxy_pairs, test_pairs):
+        if is_sequence:
+            xyxyxy_pair = np.concatenate([train_pair, test_pair])
+        else:
+            xyxyxy_pair = np.hstack([train_pair, test_pair])
+        xyxyxy_pairs.append(xyxyxy_pair)
+    
+    return xyxyxy_pairs
+
+
+# Memory-efficient version for large datasets
+def preprocess_data_generator(challenges: Dict[str, Any], solutions: Dict[str, Any]):
+    """
+    Generator version that yields one task at a time to reduce memory usage.
+    
+    Yields:
+        Tuple of (task_id, img_pairs, seq_pairs)
+    """
+    MAX_SHAPE = (30, 30)
+    PAD_VAL = 10
+    
+    for task_id, task_data in challenges.items():
+        task_sol = solutions[task_id]
+        
+        # Process training pairs
+        train_pairs_img, train_pairs_seq = _process_pairs(
+            task_data.get('train', []), MAX_SHAPE, PAD_VAL
+        )
+        
+        # Process test pairs
+        test_inputs = task_data.get('test', [])
+        test_pairs_img, test_pairs_seq = _process_test_pairs(
+            test_inputs, task_sol, MAX_SHAPE, PAD_VAL
+        )
+        
+        # Generate XYXYXY pairs
+        img_pairs = _generate_xyxyxy_pairs(train_pairs_img, test_pairs_img, is_sequence=False)
+        seq_pairs = _generate_xyxyxy_pairs(train_pairs_seq, test_pairs_seq, is_sequence=True)
+        
+        yield task_id, img_pairs, seq_pairs
 
 
 class ArcAgiGridEnv(gym.Env):
@@ -109,8 +215,9 @@ class ArcAgiGridEnv(gym.Env):
             self.evaluation_challenges = json.load(file)
         with open(evaluation_solutions_json, 'r', encoding='utf-8') as file:
             self.evaluation_solutions = json.load(file)
-        with open(test_challenges_json, 'r', encoding='utf-8') as file:
-            self.test_challenges = json.load(file)
+        if test_challenges_json is not None:
+            with open(test_challenges_json, 'r', encoding='utf-8') as file:
+                self.test_challenges = json.load(file)
         self.train_task_img_dict, self.train_task_seq_dict = preprocess_data(self.training_challenges, self.training_solutions)
         self.eval_task_img_dict, self.eval_task_seq_dict = preprocess_data(self.evaluation_challenges, self.evaluation_solutions)
         self.train_task_list = list(self.train_task_img_dict.keys())
@@ -120,8 +227,8 @@ class ArcAgiGridEnv(gym.Env):
         # Dict space gives us structured, human-readable observations
         self.observation_space = gym.spaces.Dict(
             {
-                "grid_img": gym.spaces.Box(low=0, high=10, shape=(30,660), dtype=int),
-                "grid_seq": gym.spaces.Box(low=0, high=10, shape=(19800,), dtype=int),
+                "grid_img": gym.spaces.Box(low=0, high=10, shape=(30,180), dtype=int),
+                "grid_seq": gym.spaces.Box(low=0, high=10, shape=(5400,), dtype=int),
             }
         )
         # action space에 대한 정의 (0~9 색상, 10: 마스크)
@@ -132,26 +239,6 @@ class ArcAgiGridEnv(gym.Env):
         np.random.seed(seed)
         task_id = random.choice(self.train_task_list)
         return task_id
-
-    def _get_reward(self,
-                    ) -> float:
-        """
-        positive reward: 현재 timestep까지 맞춘 영역 수 * 1/900
-        negative reward: 현재 timestep까지 틀린 영역 수 * -1/900
-        gemetric reward: 그림의 패턴을 고려한 보상 (구현예정)
-        """
-        target_grid_test_sol: int = self._target_grid_img[:, 630:]
-        current_grid_test_sol: int = self._current_grid_img[:, 630:]
-        target_grid_test_sol_cell: int = self._target_grid_seq[18900+self.timestep]
-        current_grid_test_sol_cell: int = self._current_grid_seq[18900+self.timestep]
-        target_grid_test_sol_seq = self._target_grid_seq[18900:18900+self.timestep+1]
-        current_grid_test_sol_seq = self._current_grid_seq[18900:18900+self.timestep+1]
-        num_correct_cells: int = np.sum((target_grid_test_sol_seq == current_grid_test_sol_seq).astype(int))
-        positive_reward: float = 1/900 * num_correct_cells
-        num_wrong_cells: int = np.sum((target_grid_test_sol_seq != current_grid_test_sol_seq).astype(int))
-        negative_reward: float = -1/900 * num_wrong_cells
-        geometric_reward = 0
-        return positive_reward + + negative_reward + geometric_reward
 
     def _get_obs(self) -> Dict:
         return {"current_grid_img": self._current_grid_img,
@@ -202,18 +289,18 @@ class ArcAgiGridEnv(gym.Env):
         if reset_sol_grid == 'padding':
             pad_val= 10
             self._current_grid_img = self._target_grid_img.copy()
-            self._current_grid_img[0:30, 630:] = pad_val # H: 0:30 W: 630:660
+            self._current_grid_img[0:30, 150:] = pad_val # H: 0:30 W: 630:660
             self._current_grid_seq = self._target_grid_seq.copy()
-            self._current_grid_seq[18900:] = pad_val
+            self._current_grid_seq[4500:] = pad_val
+        # target grid에서 test solution에 해당하는 부분을 전부 random value로 채우고 current grid로 할당
         elif reset_sol_grid == 'random':
-            # ! 여기서 solution에 해당하는 부분을 랜덤으로 초기화해도 좋을듯?
             rand_grid = np.random.randint(low=0,
                                             high=10,
                                             size=(30, 30))
             self._current_grid_img = self._target_grid_img.copy()
-            self._current_grid_img[0:30, 630:] = rand_grid
+            self._current_grid_img[0:30, 150:] = rand_grid
             self._current_grid_seq = self._target_grid_seq.copy()
-            self._current_grid_seq[18900:] = rand_grid.flatten()
+            self._current_grid_seq[4500:] = rand_grid.flatten()
         observation = self._get_obs()
         info = self._get_info()
         return observation, info
@@ -227,17 +314,23 @@ class ArcAgiGridEnv(gym.Env):
         """
         row = self.timestep // 30
         col = self.timestep % 30
-        self._current_grid_img[row, 630+col] = action # H: 0:30 W: 630:660
-        self._current_grid_seq[18900+self.timestep] = action
-
-        # Check if agent reached the target
-        terminated = (self.timestep == 900)
-
-        # We don't use truncation in this simple environment
-        # (could add a step limit here if desired)
-        truncated = False
-
-        reward = self._get_reward()
+        self._current_grid_img[row, 150+col] = action # H: 0:30 W: 630:660
+        self._current_grid_seq[4500+self.timestep] = action
+        
+        # target_action이 취한 action과 같은지 검사
+        target_action_img = self._target_grid_img[row, 150+col]
+        target_action_seq = self._target_grid_seq[4500+self.timestep]
+        assert target_action_img == target_action_seq
+        if action != target_action_seq:
+            terminated = True
+            reward = -1
+        else:
+            reward = 0.01
+            terminated = False
+        truncated = (self.timestep == (900 - 1))
+        if truncated and not terminated:
+            reward = 1 + 0.01
+        # TODO: 매 step 마다 +1/900 -1/900 못 맞추는 즉시, 에피소드 종료, 다 맞추면 +1
         observation = self._get_obs()
         info = self._get_info()
         self.timestep += 1
@@ -324,7 +417,7 @@ class ArcAgiGridEnv(gym.Env):
         fs=12
         task = self.train_task_img_dict[task_id]
         input_matrix = task[i]
-        plt.figure(figsize=(200, 500)) #
+        plt.figure(figsize=(100, 200)) #
         plt.imshow(input_matrix, cmap=cmap, norm=norm)
         plt.grid(True, which = 'both',color = 'lightgrey', linewidth = 1.0)
         plt.setp(plt.gcf().get_axes(), xticklabels=[], yticklabels=[])
@@ -338,7 +431,7 @@ class ArcAgiGridEnv(gym.Env):
 
     def plot_current_grid(self, w=0.5):
         fs=12
-        test_sol_current_mat = self._current_grid_img[:, 630:]
+        test_sol_current_mat = self._current_grid_img[:, 150:]
         plt.imshow(test_sol_current_mat, cmap=cmap, norm=norm)
         plt.grid(True, which = 'both',color = 'lightgrey', linewidth = 1.0)
         plt.setp(plt.gcf().get_axes(), xticklabels=[], yticklabels=[])
@@ -352,7 +445,7 @@ class ArcAgiGridEnv(gym.Env):
 
     def plot_target_grid(self, w=0.5):
         fs=12
-        test_sol_target_mat = self._target_grid_img[:, 630:]
+        test_sol_target_mat = self._target_grid_img[:, 150:]
         plt.imshow(test_sol_target_mat, cmap=cmap, norm=norm)
         plt.grid(True, which = 'both',color = 'lightgrey', linewidth = 1.0)
         plt.setp(plt.gcf().get_axes(), xticklabels=[], yticklabels=[])
@@ -364,70 +457,8 @@ class ArcAgiGridEnv(gym.Env):
         '''sub title:'''
         plt.title(f'task: {self.task_id}' + '   ' + f'#{self.test_input_idx}', fontsize=fs, color = '#000000')
 
-# %%
-env = ArcAgiGridEnv(
-    training_challenges_json='../datasets/arc-agi_training_challenges.json',
-    training_solutions_json='../datasets/arc-agi_training_solutions.json',
-    evaluation_challenges_json='../datasets/arc-agi_evaluation_challenges.json',
-    evaluation_solutions_json='../datasets/arc-agi_evaluation_solutions.json',
-    test_challenges_json='../datasets/arc-agi_test_challenges.json',
-    )
-# 794b24be train input pair 10개
-# 8dab14c2 test input 4개
-# 3cd86f4f
-obs, info = env.reset(seed=1,
-                        mode='train',
-                        task_id='3cd86f4f',
-                        reset_sol_grid='random')
-# %%
-env.plot_current_task_and_sol()
-# %%
-# 264363fd
-env.plot_padded_task(task_id='3cd86f4f', i=0)
-
-# %%
-env.plot_current_grid()
-# %%
-env.plot_target_grid()
-
-# %%
-env.plot_one_task(mode='train', 
-                  task_id='794b24be')
-# %%
-env.plot_original_task(task_id='3cd86f4f',
-             train_or_test='test',
-             i=2,
-             input_or_output='output',
-             )
-
-# %%
-obs, info = env.reset(seed=12,
-                        mode='train',
-                        # task_id='8dab14c2',
-                        reset_sol_grid='random')
-test_sol = env._target_grid_seq[18900:]
-total_reward = 0
-for t in range(900):
-    action = test_sol[t]
-    if t > 800:
-        action = env.action_space.sample()
-    next_obs, reward, terminated, trucated, info = env.step(action)
-    total_reward += reward
-    print(reward)
-env.plot_current_grid()
-print(total_reward)
-# %%
-obs, info = env.reset(seed=12,
-                        mode='train',
-                        # task_id='8dab14c2',
-                        reset_sol_grid='random')
-test_sol = env._target_grid_seq[18900:]
-total_reward = 0
-for t in range(900):
-    action = env.action_space.sample()
-    next_obs, reward, terminated, trucated, info = env.step(action)
-    total_reward += reward
-    print(reward)
-env.plot_current_grid()
-print(total_reward)
-# %%
+    def print_train_task_info(self, task_id):
+        print(f"training_challenges: num_train_pairs: {len(self.training_challenges[task_id]['train'])}")
+        print(f"training_challenges: num_test_pairs: {len(self.training_challenges[task_id]['test'])}")
+        
+        
