@@ -1,16 +1,52 @@
 # %%
 import gymnasium as gym 
+from arc_agi_grid_env import ArcAgiGridEnv, create_arc_env
+from gymnasium.envs.registration import register
 
-from arc_agi_grid_env import ArcAgiGridEnv
+register(
+    id='ArcAgiGrid-v0',
+    entry_point=create_arc_env,
+    max_episode_steps=900,  # 또는 None
+        kwargs={
+        'training_challenges_json': '../datasets/arc-agi_training_challenges.json',
+        'training_solutions_json': '../datasets/arc-agi_training_solutions.json',
+        'evaluation_challenges_json': '../datasets/arc-agi_evaluation_challenges.json',
+        'evaluation_solutions_json': '../datasets/arc-agi_evaluation_solutions.json',
+        'test_challenges_json': None,
+        }
+)
+
+# register(
+#     id='ArcAgiGrid-v0',
+#     entry_point='arc_agi_grid_env:ArcAgiGridEnv',
+#     max_episode_steps=900,
+#     kwargs={
+#         'training_challenges_json': '../datasets/arc-agi_training_challenges.json',
+#         'training_solutions_json': '../datasets/arc-agi_training_solutions.json',
+#         'evaluation_challenges_json': '../datasets/arc-agi_evaluation_challenges.json',
+#         'evaluation_solutions_json': '../datasets/arc-agi_evaluation_solutions.json',
+#         'test_challenges_json': None,
+#     }
+# )
 
 # %%
-env = ArcAgiGridEnv(
-    training_challenges_json='../datasets/arc-agi_training_challenges.json',
-    training_solutions_json='../datasets/arc-agi_training_solutions.json',
-    evaluation_challenges_json='../datasets/arc-agi_evaluation_challenges.json',
-    evaluation_solutions_json='../datasets/arc-agi_evaluation_solutions.json',
-    test_challenges_json='../datasets/arc-agi_test_challenges.json',
+# env = gym.make('ArcAgiGrid-v0')
+env = create_arc_env(
+        training_challenges_json="../datasets/arc-agi_training_challenges.json",
+        training_solutions_json="../datasets/arc-agi_training_solutions.json", 
+        evaluation_challenges_json="../datasets/arc-agi_evaluation_challenges.json",
+        evaluation_solutions_json="../datasets/arc-agi_evaluation_solutions.json",
+        test_challenges_json="../datasets/arc-agi_test_challenges.json"
     )
+
+# %%
+# env = ArcAgiGridEnv(
+#     training_challenges_json='../datasets/arc-agi_training_challenges.json',
+#     training_solutions_json='../datasets/arc-agi_training_solutions.json',
+#     evaluation_challenges_json='../datasets/arc-agi_evaluation_challenges.json',
+#     evaluation_solutions_json='../datasets/arc-agi_evaluation_solutions.json',
+#     test_challenges_json='../datasets/arc-agi_test_challenges.json',
+#     )
 # env = ArcAgiGridEnv(
 #     training_challenges_json='./datasets/re_arc_agi_training_challenges.json',
 #     training_solutions_json='./datasets/re_arc_agi_training_solutions.json',
@@ -21,10 +57,15 @@ env = ArcAgiGridEnv(
 # 794b24be train input pair 10개
 # 8dab14c2 test input 4개
 # 3cd86f4f
+options = {'mode': 'train',
+           'task_id': '794b24be',
+           'reset_sol_grid': 'random',}
 obs, info = env.reset(seed=1,
-                        mode='train',
-                        task_id='794b24be',
-                        reset_sol_grid='random')
+                      options=options,)
+# obs, info = env.reset(seed=1,
+#                         mode='train',
+#                         task_id='794b24be',
+#                         reset_sol_grid='random')
 
 # %%
 env.print_train_task_info('794b24be')
@@ -50,11 +91,12 @@ env.plot_original_task(task_id='794b24be',
             )
 
 # %%
+options = {'mode': 'train',
+           'task_id': '794b24be',
+           'reset_sol_grid': 'padding',}
 obs, info = env.reset(seed=12,
-                        mode='train',
-                        task_id='794b24be',
-                        reset_sol_grid='padding')
-test_sol = env._target_grid_seq[4500:]
+                        options=options)
+test_sol = env.unwrapped._target_grid_seq[4500:]
 total_reward = 0
 for t in range(900):
     action = test_sol[t]
@@ -65,7 +107,7 @@ for t in range(900):
     total_reward += reward
     if terminated or truncated: 
         break
-env.plot_current_grid()
+env.unwrapped.plot_current_grid()
 print(round(total_reward, 2))
 # %%
 env.plot_current_grid()

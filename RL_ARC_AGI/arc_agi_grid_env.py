@@ -2,6 +2,7 @@
 from typing import Optional
 import numpy as np
 import gymnasium as gym
+from gymnasium import Wrapper
 from itertools import permutations, product
 import json
 from typing import Tuple, Dict, Union, List, Any
@@ -255,10 +256,12 @@ class ArcAgiGridEnv(gym.Env):
 
     def reset(self,
               seed: Optional[int] = None,
-              mode: str = 'train',
-              task_id = None,
-              reset_sol_grid: str = 'padding',
               options: Optional[dict] = None):
+        
+        mode = options['mode']
+        task_id = options['task_id']
+        reset_sol_grid = options['reset_sol_grid']
+        
         self.timestep = 0
         if task_id == None:
             task_id = self._select_task(seed)
@@ -461,4 +464,47 @@ class ArcAgiGridEnv(gym.Env):
         print(f"training_challenges: num_train_pairs: {len(self.training_challenges[task_id]['train'])}")
         print(f"training_challenges: num_test_pairs: {len(self.training_challenges[task_id]['test'])}")
         
-        
+class ArcAgiWrapper(Wrapper):
+    """
+    Custom wrapper that preserves access to all custom methods
+    while maintaining compatibility with Gymnasium's interface.
+    """
+    
+    def __init__(self, env):
+        super().__init__(env)
+    
+    def __getattr__(self, name):
+        """
+        Forward any attribute access to the wrapped environment.
+        This allows access to custom methods like print_train_task_info.
+        """
+        return getattr(self.env, name)
+    
+    # 필요한 경우 특정 메서드들을 명시적으로 forwarding
+    def print_train_task_info(self, task_id):
+        return self.env.print_train_task_info(task_id)
+    
+    def plot_current_grid(self, w=0.5):
+        return self.env.plot_current_grid(w)
+    
+    def plot_target_grid(self, w=0.5):
+        return self.env.plot_target_grid(w)
+    
+    def plot_current_task_and_sol(self, mode='train'):
+        return self.env.plot_current_task_and_sol(mode)
+    
+    def plot_one_task(self, mode, task_id, size=2.5, w1=0.9):
+        return self.env.plot_one_task(mode, task_id, size, w1)
+    
+    def plot_original_task(self, task_id, train_or_test, i, input_or_output, mode='train', w=0.8):
+        return self.env.plot_original_task(task_id, train_or_test, i, input_or_output, mode, w)
+    
+    def plot_padded_task(self, task_id, i, w=0.5):
+        return self.env.plot_padded_task(task_id, i, w)
+
+# 사용 예시
+def create_arc_env(*args, **kwargs):
+    """Factory function to create ARC environment with custom wrapper"""
+    base_env = ArcAgiGridEnv(*args, **kwargs)
+    wrapped_env = ArcAgiWrapper(base_env)
+    return wrapped_env
