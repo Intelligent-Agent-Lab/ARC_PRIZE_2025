@@ -1,0 +1,37 @@
+# Environment configuration
+environment:
+  training_challenges_json: "../datasets/arc-agi_training_challenges.json"
+  training_solutions_json: "../datasets/arc-agi_training_solutions.json"
+  evaluation_challenges_json: "../datasets/arc-agi_evaluation_challenges.json"
+  evaluation_solutions_json: "../datasets/arc-agi_evaluation_solutions.json"
+  test_challenges_json: null
+  reset_sol_grid: "padding"
+  normalize_obs: true
+  reward_shaping: false
+  task_id_list: ['794b24be', ] # 3cd86f4f
+  seed: 42
+
+# Training configuration
+training:
+  num_updates: 1000
+  rollout_steps: 900
+  mini_batch_size: 64
+  ppo_epochs: 4
+  learning_rate: 3e-4
+  gamma: 0.99
+  gae_lambda: 0.95
+  eps_clip: 0.2
+  value_coef: 0.5
+  entropy_coef: 0.01
+
+# Network configuration
+network:
+  hidden_size: 64
+
+# Logging and saving configuration
+logging:
+  log_interval: 1
+  eval_interval: 50
+  eval_episodes: 10
+  save_interval: 100
+  save_dir: "models"
