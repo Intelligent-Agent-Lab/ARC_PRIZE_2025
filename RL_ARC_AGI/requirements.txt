@@ -6,3 +6,4 @@ stable-baselines3
 tyro
 wandb
 hydra-core
+tensorboard
