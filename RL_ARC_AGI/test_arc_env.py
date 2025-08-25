@@ -1,20 +1,21 @@
 # %%
 import gymnasium as gym 
-from arc_agi_grid_env import ArcAgiGridEnv, create_arc_env
-from gymnasium.envs.registration import register
+from arc_agi_grid_env import ArcAgiGridEnv, ArcAgiWrapper, create_arc_env
+from gymnasium.envs.registration import register, registry
 
-register(
-    id='ArcAgiGrid-v0',
-    entry_point=create_arc_env,
-    max_episode_steps=900,  # 또는 None
-        kwargs={
-        'training_challenges_json': '../datasets/arc-agi_training_challenges.json',
-        'training_solutions_json': '../datasets/arc-agi_training_solutions.json',
-        'evaluation_challenges_json': '../datasets/arc-agi_evaluation_challenges.json',
-        'evaluation_solutions_json': '../datasets/arc-agi_evaluation_solutions.json',
-        'test_challenges_json': None,
-        }
-)
+def register_arc_env():
+    register(
+        id='ArcAgiGrid-v0',
+        entry_point=create_arc_env,
+        max_episode_steps=900,  # 또는 None
+            kwargs={
+            'training_challenges_json': '../datasets/arc-agi_training_challenges.json',
+            'training_solutions_json': '../datasets/arc-agi_training_solutions.json',
+            'evaluation_challenges_json': '../datasets/arc-agi_evaluation_challenges.json',
+            'evaluation_solutions_json': '../datasets/arc-agi_evaluation_solutions.json',
+            'test_challenges_json': None,
+            }
+    )
 
 # register(
 #     id='ArcAgiGrid-v0',
@@ -30,7 +31,6 @@ register(
 # )
 
 # %%
-# env = gym.make('ArcAgiGrid-v0')
 env = create_arc_env(
         training_challenges_json="../datasets/arc-agi_training_challenges.json",
         training_solutions_json="../datasets/arc-agi_training_solutions.json", 
@@ -39,21 +39,6 @@ env = create_arc_env(
         test_challenges_json="../datasets/arc-agi_test_challenges.json"
     )
 
-# %%
-# env = ArcAgiGridEnv(
-#     training_challenges_json='../datasets/arc-agi_training_challenges.json',
-#     training_solutions_json='../datasets/arc-agi_training_solutions.json',
-#     evaluation_challenges_json='../datasets/arc-agi_evaluation_challenges.json',
-#     evaluation_solutions_json='../datasets/arc-agi_evaluation_solutions.json',
-#     test_challenges_json='../datasets/arc-agi_test_challenges.json',
-#     )
-# env = ArcAgiGridEnv(
-#     training_challenges_json='./datasets/re_arc_agi_training_challenges.json',
-#     training_solutions_json='./datasets/re_arc_agi_training_solutions.json',
-#     evaluation_challenges_json='./datasets/re_arc_agi_evaluation_challenges.json',
-#     evaluation_solutions_json='./datasets/re_arc_agi_evaluation_solutions.json',
-#     test_challenges_json=None,
-#     )
 # 794b24be train input pair 10개
 # 8dab14c2 test input 4개
 # 3cd86f4f
