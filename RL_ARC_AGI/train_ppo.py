@@ -2,12 +2,13 @@ import os
 import sys
 import random
 import time
-import argparse
 from typing import Dict, List, Any
 import numpy as np
 import torch
 import gymnasium as gym
 from collections import deque
+import hydra
+from omegaconf import DictConfig, OmegaConf
 
 # Add current directory to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -21,7 +22,7 @@ from ppo_agent import PPOAgent
 class ArcAgiTrainer:
     """Trainer class for PPO on ArcAgiGrid environment."""
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: DictConfig):
         self.config = config
         self.setup_environment()
         self.setup_agent()
@@ -31,20 +32,22 @@ class ArcAgiTrainer:
         """Setup the training environment."""
         # Create base environment
         base_env = ArcAgiGridEnv(
-            training_challenges_json=self.config['training_challenges_json'],
-            training_solutions_json=self.config['training_solutions_json'],
-            evaluation_challenges_json=self.config['evaluation_challenges_json'],
-            evaluation_solutions_json=self.config['evaluation_solutions_json'],
-            test_challenges_json=self.config.get('test_challenges_json', None)
+            training_challenges_json=self.config.environment.training_challenges_json,
+            training_solutions_json=self.config.environment.training_solutions_json,
+            evaluation_challenges_json=self.config.environment.evaluation_challenges_json,
+            evaluation_solutions_json=self.config.environment.evaluation_solutions_json,
+            test_challenges_json=self.config.environment.test_challenges_json
         )
         
         # Wrap environment
         self.env = create_wrapped_env(
             base_env, 
-            normalize=self.config.get('normalize_obs', True),
-            reward_shaping=self.config.get('reward_shaping', False)
+            normalize=self.config.environment.normalize_obs,
+            reward_shaping=self.config.environment.reward_shaping
         )
-        
+        self.task_id_list = list(self.config.environment.task_id_list)
+        self.seed = self.config.environment.seed
+
         print(f"Environment created successfully!")
         print(f"Observation space: {self.env.observation_space}")
         print(f"Action space: {self.env.action_space}")
@@ -57,12 +60,12 @@ class ArcAgiTrainer:
         self.agent = PPOAgent(
             input_size=obs_size,
             action_size=action_size,
-            hidden_size=self.config.get('hidden_size', 512),
-            learning_rate=self.config.get('learning_rate', 3e-4),
-            gamma=self.config.get('gamma', 0.99),
-            eps_clip=self.config.get('eps_clip', 0.2),
-            value_coef=self.config.get('value_coef', 0.5),
-            entropy_coef=self.config.get('entropy_coef', 0.01)
+            hidden_size=self.config.network.hidden_size,
+            learning_rate=self.config.training.learning_rate,
+            gamma=self.config.training.gamma,
+            eps_clip=self.config.training.eps_clip,
+            value_coef=self.config.training.value_coef,
+            entropy_coef=self.config.training.entropy_coef
         )
         
         print(f"PPO Agent created with device: {self.agent.device}")
@@ -81,12 +84,14 @@ class ArcAgiTrainer:
         episodes_completed = 0
         successful_episodes = 0
         
+        task_id = random.choice(self.task_id_list)
+        
         obs, info = self.env.reset(
-            seed=random.randint(0, 10000),
+            seed=self.seed,
             options={
                 'mode': 'train',
-                'task_id': None,
-                'reset_sol_grid': self.config.get('reset_sol_grid', 'padding')
+                'task_id': task_id,
+                'reset_sol_grid': self.config.environment.reset_sol_grid
             }
         )
         
@@ -119,11 +124,11 @@ class ArcAgiTrainer:
                 
                 # Reset environment
                 obs, info = self.env.reset(
-                    seed=random.randint(0, 10000),
+                    seed=self.seed,
                     options={
                         'mode': 'train',
-                        'task_id': '794b24be',
-                        'reset_sol_grid': self.config.get('reset_sol_grid', 'padding')
+                        'task_id': task_id,
+                        'reset_sol_grid': self.config.environment.reset_sol_grid
                     }
                 )
                 total_reward = 0
@@ -143,12 +148,14 @@ class ArcAgiTrainer:
         eval_rewards = []
         eval_success = []
         
+        task_id = random.choice(self.task_id_list)
+        
         for episode in range(num_episodes):
             obs, info = self.env.reset(
-                seed=episode,  # Fixed seed for reproducible evaluation
+                seed=self.seed,  # Fixed seed for reproducible evaluation
                 options={
                     'mode': 'train',  # Can change to 'evaluation' for harder tasks
-                    'task_id': None,
+                    'task_id': task_id,
                     'reset_sol_grid': 'padding'
                 }
             )
@@ -185,29 +192,29 @@ class ArcAgiTrainer:
         
         best_mean_reward = -float('inf')
         
-        for update in range(self.config['num_updates']):
+        for update in range(self.config.training.num_updates):
             start_time = time.time()
             
             # Collect rollouts
-            rollout_info = self.collect_rollouts(self.config['rollout_steps'])
+            rollout_info = self.collect_rollouts(self.config.training.rollout_steps)
             
             # Update agent
             training_metrics = self.agent.update(
                 next_value=rollout_info['final_value'],
-                gae_lambda=self.config.get('gae_lambda', 0.95),
-                ppo_epochs=self.config.get('ppo_epochs', 4),
-                mini_batch_size=self.config.get('mini_batch_size', 64)
+                gae_lambda=self.config.training.gae_lambda,
+                ppo_epochs=self.config.training.ppo_epochs,
+                mini_batch_size=self.config.training.mini_batch_size
             )
             
             update_time = time.time() - start_time
             
             # Logging
-            if update % self.config.get('log_interval', 10) == 0:
+            if update % self.config.logging.log_interval == 0:
                 mean_reward = np.mean(self.episode_rewards) if self.episode_rewards else 0
                 mean_length = np.mean(self.episode_lengths) if self.episode_lengths else 0
                 success_rate = np.mean(self.success_rate) if self.success_rate else 0
                 
-                print(f"\nUpdate {update}/{self.config['num_updates']}")
+                print(f"\nUpdate {update}/{self.config.training.num_updates}")
                 print(f"Episodes completed in rollout: {rollout_info['episodes_completed']}")
                 print(f"Mean reward (last 100 episodes): {mean_reward:.3f}")
                 print(f"Mean episode length: {mean_length:.1f}")
@@ -220,8 +227,8 @@ class ArcAgiTrainer:
                     print(f"Entropy loss: {training_metrics['entropy_loss']:.4f}")
             
             # Evaluation
-            if update % self.config.get('eval_interval', 50) == 0 and update > 0:
-                eval_metrics = self.evaluate_agent(self.config.get('eval_episodes', 10))
+            if update % self.config.logging.eval_interval == 0 and update > 0:
+                eval_metrics = self.evaluate_agent(self.config.logging.eval_episodes)
                 print(f"\nEvaluation after update {update}:")
                 for key, value in eval_metrics.items():
                     print(f"{key}: {value:.3f}")
@@ -229,83 +236,31 @@ class ArcAgiTrainer:
                 # Save best model
                 if eval_metrics['eval_mean_reward'] > best_mean_reward:
                     best_mean_reward = eval_metrics['eval_mean_reward']
-                    self.agent.save(os.path.join(self.config['save_dir'], 'best_model.pth'))
+                    self.agent.save(os.path.join(self.config.logging.save_dir, 'best_model.pth'))
                     print(f"New best model saved! Mean reward: {best_mean_reward:.3f}")
             
             # Save checkpoint
-            if update % self.config.get('save_interval', 100) == 0 and update > 0:
-                checkpoint_path = os.path.join(self.config['save_dir'], f'checkpoint_{update}.pth')
+            if update % self.config.logging.save_interval == 0 and update > 0:
+                checkpoint_path = os.path.join(self.config.logging.save_dir, f'checkpoint_{update}.pth')
                 self.agent.save(checkpoint_path)
                 print(f"Checkpoint saved: {checkpoint_path}")
         
         print("Training completed!")
         
         # Final save
-        final_path = os.path.join(self.config['save_dir'], 'final_model.pth')
+        final_path = os.path.join(self.config.logging.save_dir, 'final_model.pth')
         self.agent.save(final_path)
         print(f"Final model saved: {final_path}")
 
 
-def get_default_config():
-    """Get default training configuration."""
-    return {
-        # Environment
-        'training_challenges_json': '../datasets/arc-agi_training_challenges.json',
-        'training_solutions_json': '../datasets/arc-agi_training_solutions.json',
-        'evaluation_challenges_json': '../datasets/arc-agi_evaluation_challenges.json',
-        'evaluation_solutions_json': '../datasets/arc-agi_evaluation_solutions.json',
-        'test_challenges_json': None,
-        'reset_sol_grid': 'padding',
-        'normalize_obs': True,
-        'reward_shaping': False,
-        
-        # Training
-        'num_updates': 1000,
-        'rollout_steps': 2048,
-        'mini_batch_size': 64,
-        'ppo_epochs': 4,
-        'learning_rate': 3e-4,
-        'gamma': 0.99,
-        'gae_lambda': 0.95,
-        'eps_clip': 0.2,
-        'value_coef': 0.5,
-        'entropy_coef': 0.01,
-        
-        # Network
-        'hidden_size': 512,
-        
-        # Logging and saving
-        'log_interval': 10,
-        'eval_interval': 50,
-        'eval_episodes': 10,
-        'save_interval': 100,
-        'save_dir': 'models',
-    }
-
-
-def main():
-    parser = argparse.ArgumentParser(description='Train PPO on ArcAgiGrid environment')
-    parser.add_argument('--config', type=str, help='Path to config file')
-    parser.add_argument('--save_dir', type=str, default='models', help='Directory to save models')
-    parser.add_argument('--num_updates', type=int, default=1000, help='Number of training updates')
-    parser.add_argument('--rollout_steps', type=int, default=2048, help='Steps per rollout')
-    parser.add_argument('--learning_rate', type=float, default=3e-4, help='Learning rate')
-    
-    args = parser.parse_args()
-    
-    # Get default config and update with args
-    config = get_default_config()
-    if args.save_dir:
-        config['save_dir'] = args.save_dir
-    if args.num_updates:
-        config['num_updates'] = args.num_updates
-    if args.rollout_steps:
-        config['rollout_steps'] = args.rollout_steps
-    if args.learning_rate:
-        config['learning_rate'] = args.learning_rate
+@hydra.main(version_base=None, config_path="config", config_name="ppo")
+def main(cfg: DictConfig) -> None:
+    """Main training function with Hydra configuration."""
+    print("Training configuration:")
+    print(OmegaConf.to_yaml(cfg))
     
     # Create save directory
-    os.makedirs(config['save_dir'], exist_ok=True)
+    os.makedirs(cfg.logging.save_dir, exist_ok=True)
     
     # Set random seeds for reproducibility
     random.seed(42)
@@ -313,7 +268,7 @@ def main():
     torch.manual_seed(42)
     
     # Create trainer and start training
-    trainer = ArcAgiTrainer(config)
+    trainer = ArcAgiTrainer(cfg)
     trainer.train()
 
 
