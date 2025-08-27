@@ -86,7 +86,7 @@ class ActionMaskingWrapper(gym.Wrapper):
         return np.ones(self.action_space.n, dtype=bool)
 
 
-def create_wrapped_env(base_env, normalize: bool = True, reward_shaping: bool = False) -> gym.Env:
+def create_wrapped_env(base_env, normalize: bool = False, reward_shaping: bool = False) -> gym.Env:
     """
     Factory function to create a properly wrapped ArcAgiGrid environment.
     
@@ -101,7 +101,7 @@ def create_wrapped_env(base_env, normalize: bool = True, reward_shaping: bool = 
     env = base_env
     
     # Extract sequence observations
-    env = SequenceObservationWrapper(env)
+    # env = SequenceObservationWrapper(env)
     
     # Normalize observations if requested
     if normalize:

@@ -11,12 +11,12 @@ import gymnasium as gym
 class ActorCritic(nn.Module):
     """Actor-Critic network for PPO with grid sequence observations."""
     
-    def __init__(self, input_size: int = 5400, hidden_size: int = 512, action_size: int = 11):
+    def __init__(self, input_size: int = 5400, hidden_size: int = 64, action_size: int = 11):
         super(ActorCritic, self).__init__()
         self.embedding = nn.Embedding(11, hidden_size)
+
         # Shared layers
         self.shared_layers = nn.Sequential(
-            nn.Embedding(11, hidden_size),
             nn.Linear(hidden_size, hidden_size),
             nn.ReLU(),
             nn.Linear(hidden_size, hidden_size),
@@ -28,20 +28,21 @@ class ActorCritic(nn.Module):
         # Actor head (policy)
         self.actor = nn.Sequential(
             nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(hidden_size, action_size)
         )
         
         # Critic head (value function)
         self.critic = nn.Sequential(
             nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
+            nn.GELU(),
             nn.Linear(hidden_size, 1)
         )
         
     def forward(self, x):
         """Forward pass returning both action probabilities and state value."""
         x = x.to(int)
+        x = self.embedding(x)
         shared_features = self.shared_layers(x)
         shared_features = shared_features.mean(dim=1)
         action_logits = self.actor(shared_features)
@@ -134,7 +135,7 @@ class PPOAgent:
     def update(self, next_value: float = 0.0, gae_lambda: float = 0.95, 
                ppo_epochs: int = 4, mini_batch_size: int = 64):
         """Update policy using PPO."""
-        if len(self.observations) == 0:
+        if len(self.observations) < 2:
             return {}
         
         # Compute advantages and returns

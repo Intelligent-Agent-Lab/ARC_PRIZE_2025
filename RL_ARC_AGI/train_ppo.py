@@ -9,7 +9,10 @@ import gymnasium as gym
 from collections import deque
 import hydra
 from omegaconf import DictConfig, OmegaConf
-
+import wandb
+import matplotlib.pyplot as plt
+from torch.utils.tensorboard import SummaryWriter
+from arc_agi_grid_env import create_arc_env
 # Add current directory to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -17,7 +20,8 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from arc_agi_grid_env import ArcAgiGridEnv
 from env_wrappers import create_wrapped_env
 from ppo_agent import PPOAgent
-
+from matplotlib import colors
+from pathlib import Path
 
 class ArcAgiTrainer:
     """Trainer class for PPO on ArcAgiGrid environment."""
@@ -31,20 +35,27 @@ class ArcAgiTrainer:
     def setup_environment(self):
         """Setup the training environment."""
         # Create base environment
-        base_env = ArcAgiGridEnv(
+        # base_env = ArcAgiGridEnv(
+        #     training_challenges_json=self.config.environment.training_challenges_json,
+        #     training_solutions_json=self.config.environment.training_solutions_json,
+        #     evaluation_challenges_json=self.config.environment.evaluation_challenges_json,
+        #     evaluation_solutions_json=self.config.environment.evaluation_solutions_json,
+        #     test_challenges_json=self.config.environment.test_challenges_json
+        # )
+        
+        # Wrap environment
+        # self.env = create_wrapped_env(
+        #     base_env, 
+        #     normalize=self.config.environment.normalize_obs,
+        #     reward_shaping=self.config.environment.reward_shaping
+        # )
+        self.env = create_arc_env(
             training_challenges_json=self.config.environment.training_challenges_json,
             training_solutions_json=self.config.environment.training_solutions_json,
             evaluation_challenges_json=self.config.environment.evaluation_challenges_json,
             evaluation_solutions_json=self.config.environment.evaluation_solutions_json,
             test_challenges_json=self.config.environment.test_challenges_json
-        )
-        
-        # Wrap environment
-        self.env = create_wrapped_env(
-            base_env, 
-            normalize=self.config.environment.normalize_obs,
-            reward_shaping=self.config.environment.reward_shaping
-        )
+            )
         self.task_id_list = list(self.config.environment.task_id_list)
         self.seed = self.config.environment.seed
 
@@ -77,7 +88,114 @@ class ArcAgiTrainer:
         self.success_rate = deque(maxlen=100)
         self.training_metrics = []
         
-    def collect_rollouts(self, rollout_steps: int) -> Dict[str, float]:
+        # Initialize wandb logger
+        if self.config.logging.use_wandb:
+            wandb.init(
+                project=self.config.logging.wandb_project,
+                config=OmegaConf.to_container(self.config, resolve=True),
+                name=f"ppo_arc_agi_{time.strftime('%Y%m%d_%H%M%S')}"
+            )
+        
+        # Initialize tensorboard logger
+        if self.config.logging.use_tensorboard:
+            self.tensorboard_writer = SummaryWriter(
+                log_dir=os.path.join(self.config.logging.save_dir, "tensorboard_logs")
+            )
+        else:
+            self.tensorboard_writer = None
+    
+    def visualize_grid(self, update: int, w=0.5, first=False):
+        """Visualize current grid state and log to wandb/tensorboard."""
+        cmap = colors.ListedColormap(
+            ['#000000', # 0: black
+            '#0074D9', # 1: blue
+            '#FF4136', # 2: red
+            '#2ECC40', # 3: green
+            '#FFDC00', # 4: yello
+            '#AAAAAA', # 5: gray
+            '#F012BE', # 6: magenta
+            '#FF851B', # 7: oragne
+            '#7FDBFF', # 8: sky
+            '#870C25', # 9: brwon
+            '#FFFFFF', # 10: mask
+            ])
+        norm = colors.Normalize(vmin=0, vmax=10)
+        # Get current grid from environment
+        info_dict = self.env._get_info()  # Access the environment's current grid
+        target_grid = info_dict['target_grid_img']
+        current_grid = info_dict['current_grid_img']
+        timestep = info_dict['timestep']
+        task_id = info_dict['task_id']
+        test_input_idx = info_dict['test_input_idx']
+        
+        test_sol_current_mat = current_grid[:, 120:]
+        test_sol_target_mat = target_grid[:, 120:]
+            
+        target_path = Path(f"./figures/target.png")
+        if first:
+            plt.imshow(test_sol_target_mat, cmap=cmap, norm=norm)
+            plt.grid(True, which = 'both',color = 'lightgrey', linewidth = 1.0)
+            plt.setp(plt.gcf().get_axes(), xticklabels=[], yticklabels=[])
+            # '''Grid:'''
+            plt.grid(visible= True, which = 'both', color = '#666666', linewidth = w)
+            plt.xticks([x-0.5 for x in range(1 + len(test_sol_target_mat[0]))])
+            plt.yticks([x-0.5 for x in range(1 + len(test_sol_target_mat))])
+            plt.tick_params(axis='both', color='none', length=0)
+            '''sub title:'''
+            plt.title(f'task: #{task_id}' + '  ' + f'test_input_idx: #{test_input_idx}  ', fontsize=12, color = '#000000')
+            figure_folder_path = Path("./figures")
+            if not figure_folder_path.exists():
+                figure_folder_path.mkdir(parents=True)
+            plt.savefig(f"./figures/target.png")
+        try:
+
+            # Create visualization
+            plt.imshow(test_sol_current_mat, cmap=cmap, norm=norm)
+            plt.grid(True, which = 'both',color = 'lightgrey', linewidth = 1.0)
+            plt.setp(plt.gcf().get_axes(), xticklabels=[], yticklabels=[])
+            # '''Grid:'''
+            plt.grid(visible= True, which = 'both', color = '#666666', linewidth = w)
+            plt.xticks([x-0.5 for x in range(1 + len(test_sol_current_mat[0]))])
+            plt.yticks([x-0.5 for x in range(1 + len(test_sol_current_mat))])
+            plt.tick_params(axis='both', color='none', length=0)
+            '''sub title:'''
+            plt.title(f'task: #{task_id}' + '  ' + f'test_input_idx: #{test_input_idx}  ' + f'update: #{update}  timestep: #{timestep}', fontsize=12, color = '#000000')
+            figure_folder_path = Path("./figures")
+            if not figure_folder_path.exists():
+                figure_folder_path.mkdir(parents=True)
+            plt.savefig(f"./figures/{update}_current.png")
+            
+            # Create visualization
+
+            
+            # fig, ax = plt.subplots(1, 1, figsize=(8, 8))
+            # im = ax.imshow(current_grid, cmap='tab20', vmin=0, vmax=19)
+            # ax.set_title(f"Agent Grid State - Update {update}")
+            # ax.grid(True, color='white', linewidth=0.5)
+            # ax.set_xticks(range(current_grid.shape[1]))
+            # ax.set_yticks(range(current_grid.shape[0]))
+            
+            # # Add colorbar
+            # plt.colorbar(im, ax=ax)
+            
+            # # Log to wandb
+            # if self.config.logging.use_wandb:
+            #     wandb.log({"grid_visualization": wandb.Image(fig), "update": update})
+            
+            # # Save and log to tensorboard
+            # if self.tensorboard_writer:
+            #     # Save figure to numpy array
+            #     fig.canvas.draw()
+            #     buf = np.frombuffer(fig.canvas.tostring_rgb(), dtype=np.uint8)
+            #     buf = buf.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            #     self.tensorboard_writer.add_image("grid_visualization", buf, update, dataformats='HWC')
+            plt.close()
+            # plt.close(fig)
+            
+        except Exception as e:
+            print(f"Warning: Could not visualize grid at update {update}: {e}")
+        
+    def collect_rollouts(self, rollout_steps: int, update: int) -> Dict[str, float]:
         """Collect rollout data for training."""
         total_reward = 0
         total_steps = 0
@@ -101,8 +219,9 @@ class ArcAgiTrainer:
             
             # Take environment step
             next_obs, reward, terminated, truncated, info = self.env.step(action)
+            timestep = info['timestep']
             done = terminated or truncated
-            
+            print(f"update: {update}, timestep: {timestep}, action: {action}, terminated: {terminated}, truncated: {truncated}")
             # Store transition
             self.agent.store_transition(obs, action, log_prob, reward, value, done)
             
@@ -121,7 +240,6 @@ class ArcAgiTrainer:
                     self.success_rate.append(1.0)
                 else:
                     self.success_rate.append(0.0)
-                
                 # Reset environment
                 obs, info = self.env.reset(
                     seed=self.seed,
@@ -138,6 +256,7 @@ class ArcAgiTrainer:
         _, _, final_value = self.agent.select_action(obs)
         
         return {
+            'total_reward': total_reward,
             'episodes_completed': episodes_completed,
             'successful_episodes': successful_episodes,
             'final_value': final_value
@@ -191,12 +310,18 @@ class ArcAgiTrainer:
         print(f"Configuration: {self.config}")
         
         best_mean_reward = -float('inf')
-        
+        first = True
         for update in range(self.config.training.num_updates):
             start_time = time.time()
             
             # Collect rollouts
-            rollout_info = self.collect_rollouts(self.config.training.rollout_steps)
+            rollout_info = self.collect_rollouts(self.config.training.rollout_steps, update)
+            # Grid visualization
+            total_reward = rollout_info['total_reward']
+            if total_reward > -0.98 and update % self.config.logging.visualize_period == 0 and update > 0:
+                print(f"Creating grid visualization at update {update}...")
+                self.visualize_grid(update, first=first)
+                first = False
             
             # Update agent
             training_metrics = self.agent.update(
@@ -225,6 +350,36 @@ class ArcAgiTrainer:
                     print(f"Policy loss: {training_metrics['policy_loss']:.4f}")
                     print(f"Value loss: {training_metrics['value_loss']:.4f}")
                     print(f"Entropy loss: {training_metrics['entropy_loss']:.4f}")
+                
+                # Log to wandb
+                if self.config.logging.use_wandb:
+                    log_dict = {
+                        'train/mean_reward': mean_reward,
+                        'train/mean_length': mean_length,
+                        'train/success_rate': success_rate,
+                        'train/episodes_completed': rollout_info['episodes_completed'],
+                        'train/update_time': update_time,
+                        'update': update
+                    }
+                    if training_metrics:
+                        log_dict.update({
+                            'train/policy_loss': training_metrics['policy_loss'],
+                            'train/value_loss': training_metrics['value_loss'],
+                            'train/entropy_loss': training_metrics['entropy_loss']
+                        })
+                    wandb.log(log_dict)
+                
+                # Log to tensorboard
+                if self.tensorboard_writer:
+                    self.tensorboard_writer.add_scalar('train/mean_reward', mean_reward, update)
+                    self.tensorboard_writer.add_scalar('train/mean_length', mean_length, update)
+                    self.tensorboard_writer.add_scalar('train/success_rate', success_rate, update)
+                    self.tensorboard_writer.add_scalar('train/episodes_completed', rollout_info['episodes_completed'], update)
+                    self.tensorboard_writer.add_scalar('train/update_time', update_time, update)
+                    if training_metrics:
+                        self.tensorboard_writer.add_scalar('train/policy_loss', training_metrics['policy_loss'], update)
+                        self.tensorboard_writer.add_scalar('train/value_loss', training_metrics['value_loss'], update)
+                        self.tensorboard_writer.add_scalar('train/entropy_loss', training_metrics['entropy_loss'], update)
             
             # Evaluation
             if update % self.config.logging.eval_interval == 0 and update > 0:
@@ -233,12 +388,26 @@ class ArcAgiTrainer:
                 for key, value in eval_metrics.items():
                     print(f"{key}: {value:.3f}")
                 
+                # Log evaluation metrics
+                if self.config.logging.use_wandb:
+                    eval_log_dict = {f"eval/{key}": value for key, value in eval_metrics.items()}
+                    eval_log_dict['update'] = update
+                    wandb.log(eval_log_dict)
+                
+                if self.tensorboard_writer:
+                    for key, value in eval_metrics.items():
+                        self.tensorboard_writer.add_scalar(f"eval/{key.replace('eval_', '')}", value, update)
+                
                 # Save best model
                 if eval_metrics['eval_mean_reward'] > best_mean_reward:
                     best_mean_reward = eval_metrics['eval_mean_reward']
                     self.agent.save(os.path.join(self.config.logging.save_dir, 'best_model.pth'))
                     print(f"New best model saved! Mean reward: {best_mean_reward:.3f}")
+                    
+                    if self.config.logging.use_wandb:
+                        wandb.log({'train/best_mean_reward': best_mean_reward, 'update': update})
             
+
             # Save checkpoint
             if update % self.config.logging.save_interval == 0 and update > 0:
                 checkpoint_path = os.path.join(self.config.logging.save_dir, f'checkpoint_{update}.pth')
@@ -251,6 +420,13 @@ class ArcAgiTrainer:
         final_path = os.path.join(self.config.logging.save_dir, 'final_model.pth')
         self.agent.save(final_path)
         print(f"Final model saved: {final_path}")
+        
+        # Close loggers
+        if self.config.logging.use_wandb:
+            wandb.finish()
+        
+        if self.tensorboard_writer:
+            self.tensorboard_writer.close()
 
 
 @hydra.main(version_base=None, config_path="config", config_name="ppo")
@@ -263,9 +439,9 @@ def main(cfg: DictConfig) -> None:
     os.makedirs(cfg.logging.save_dir, exist_ok=True)
     
     # Set random seeds for reproducibility
-    random.seed(42)
-    np.random.seed(42)
-    torch.manual_seed(42)
+    random.seed(cfg.environment.seed)
+    np.random.seed(cfg.environment.seed)
+    torch.manual_seed(cfg.environment.seed)
     
     # Create trainer and start training
     trainer = ArcAgiTrainer(cfg)

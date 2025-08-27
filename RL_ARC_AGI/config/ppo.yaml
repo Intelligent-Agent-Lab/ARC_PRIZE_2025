@@ -6,27 +6,27 @@ environment:
   evaluation_solutions_json: "../datasets/arc-agi_evaluation_solutions.json"
   test_challenges_json: null
   reset_sol_grid: "padding"
-  normalize_obs: true
+  normalize_obs: false
   reward_shaping: false
-  task_id_list: ['794b24be', ] # 3cd86f4f
+  task_id_list: ['3cd86f4f', ] # 3cd86f4f, 794b24be
   seed: 42
 
 # Training configuration
 training:
-  num_updates: 1000
-  rollout_steps: 900
-  mini_batch_size: 64
+  num_updates: 50000
+  rollout_steps: 2048
+  mini_batch_size: 256
   ppo_epochs: 4
   learning_rate: 3e-4
-  gamma: 0.99
-  gae_lambda: 0.95
+  gamma: 0.999
+  gae_lambda: 0.99
   eps_clip: 0.2
   value_coef: 0.5
-  entropy_coef: 0.01
+  entropy_coef: 0.5
 
 # Network configuration
 network:
-  hidden_size: 64
+  hidden_size: 256
 
 # Logging and saving configuration
 logging:
@@ -35,3 +35,7 @@ logging:
   eval_episodes: 10
   save_interval: 100
   save_dir: "models"
+  visualize_period: 2
+  use_wandb: true
+  use_tensorboard: true
+  wandb_project: "arc_agi_ppo"
