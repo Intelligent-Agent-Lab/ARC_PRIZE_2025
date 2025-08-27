@@ -18,7 +18,6 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Import our modules
 from arc_agi_grid_env import ArcAgiGridEnv
-from env_wrappers import create_wrapped_env
 from ppo_agent import PPOAgent
 from matplotlib import colors
 from pathlib import Path
@@ -35,20 +34,6 @@ class ArcAgiTrainer:
     def setup_environment(self):
         """Setup the training environment."""
         # Create base environment
-        # base_env = ArcAgiGridEnv(
-        #     training_challenges_json=self.config.environment.training_challenges_json,
-        #     training_solutions_json=self.config.environment.training_solutions_json,
-        #     evaluation_challenges_json=self.config.environment.evaluation_challenges_json,
-        #     evaluation_solutions_json=self.config.environment.evaluation_solutions_json,
-        #     test_challenges_json=self.config.environment.test_challenges_json
-        # )
-        
-        # Wrap environment
-        # self.env = create_wrapped_env(
-        #     base_env, 
-        #     normalize=self.config.environment.normalize_obs,
-        #     reward_shaping=self.config.environment.reward_shaping
-        # )
         self.env = create_arc_env(
             training_challenges_json=self.config.environment.training_challenges_json,
             training_solutions_json=self.config.environment.training_solutions_json,

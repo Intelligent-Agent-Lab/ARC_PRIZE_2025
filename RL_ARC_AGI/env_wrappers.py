@@ -101,8 +101,6 @@ def create_wrapped_env(base_env, normalize: bool = False, reward_shaping: bool =
     env = base_env
     
     # Extract sequence observations
-    # env = SequenceObservationWrapper(env)
-    
     # Normalize observations if requested
     if normalize:
         env = NormalizeObservationWrapper(env, max_value=10.0)
