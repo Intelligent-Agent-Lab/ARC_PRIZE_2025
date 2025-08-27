@@ -7,6 +7,7 @@ import numpy as np
 from typing import Tuple, List
 import gymnasium as gym
 from network.mlp import ActorCritic_MLP
+from network.vit import ActorCritic_ViT
 
 class PPOAgent:
     """PPO Agent for training on ArcAgiGrid environment."""
@@ -37,7 +38,7 @@ class PPOAgent:
         elif cfg.network.type == 'mamba':
             pass
         elif cfg.network.type == 'vit':
-            pass
+            self.ac_network = ActorCritic_ViT().to(device)
         self.optimizer = optim.Adam(self.ac_network.parameters(), lr=learning_rate)
         
         # Storage for rollouts
