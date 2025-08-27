@@ -6,64 +6,13 @@ from torch.distributions import Categorical
 import numpy as np
 from typing import Tuple, List
 import gymnasium as gym
-
-
-class ActorCritic(nn.Module):
-    """Actor-Critic network for PPO with grid sequence observations."""
-    
-    def __init__(self, input_size: int = 5400, hidden_size: int = 64, action_size: int = 11):
-        super(ActorCritic, self).__init__()
-        self.embedding = nn.Embedding(11, hidden_size)
-
-        # Shared layers
-        self.shared_layers = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.ReLU(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.ReLU()
-        )
-        
-        # Actor head (policy)
-        self.actor = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size),
-            nn.GELU(),
-            nn.Linear(hidden_size, action_size)
-        )
-        
-        # Critic head (value function)
-        self.critic = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size),
-            nn.GELU(),
-            nn.Linear(hidden_size, 1)
-        )
-        
-    def forward(self, x):
-        """Forward pass returning both action probabilities and state value."""
-        x = x.to(int)
-        x = self.embedding(x)
-        shared_features = self.shared_layers(x)
-        shared_features = shared_features.mean(dim=1)
-        action_logits = self.actor(shared_features)
-        state_value = self.critic(shared_features)
-        return action_logits, state_value
-    
-    def get_action_and_value(self, x, action=None):
-        """Get action, log probability, entropy, and value."""
-        action_logits, value = self.forward(x)
-        probs = Categorical(logits=action_logits)
-        
-        if action is None:
-            action = probs.sample()
-        
-        return action, probs.log_prob(action), probs.entropy(), value
-
+from network.mlp import ActorCritic_MLP
 
 class PPOAgent:
     """PPO Agent for training on ArcAgiGrid environment."""
     
     def __init__(self, 
+                 cfg,
                  input_size: int = 5400,
                  action_size: int = 11,
                  hidden_size: int = 512,
@@ -81,11 +30,28 @@ class PPOAgent:
         self.entropy_coef = entropy_coef
         
         # Initialize actor-critic network
-        self.ac_network = ActorCritic(input_size, hidden_size, action_size).to(device)
+        if cfg.network.type == 'mlp':
+            self.ac_network = ActorCritic_MLP(input_size, hidden_size, action_size).to(device)
+        elif cfg.network.type == 'transformer':
+            pass
+        elif cfg.network.type == 'mamba':
+            pass
+        elif cfg.network.type == 'vit':
+            pass
         self.optimizer = optim.Adam(self.ac_network.parameters(), lr=learning_rate)
         
         # Storage for rollouts
         self.reset_storage()
+        
+    def get_action_and_value(self, x, action=None):
+        """Get action, log probability, entropy, and value."""
+        action_logits, value = self.ac_network(x)
+        probs = Categorical(logits=action_logits)
+        
+        if action is None:
+            action = probs.sample()
+        
+        return action, probs.log_prob(action), probs.entropy(), value
         
     def reset_storage(self):
         """Reset storage for collecting rollout data."""
@@ -101,7 +67,7 @@ class PPOAgent:
         obs_tensor = torch.FloatTensor(observation).unsqueeze(0).to(self.device)
         
         with torch.no_grad():
-            action, log_prob, entropy, value = self.ac_network.get_action_and_value(obs_tensor)
+            action, log_prob, entropy, value = self.get_action_and_value(obs_tensor)
         
         return action.item(), log_prob.item(), value.item()
     
@@ -172,7 +138,7 @@ class PPOAgent:
                 batch_returns = returns_tensor[batch_indices]
                 
                 # Forward pass
-                _, new_log_probs, entropy, values = self.ac_network.get_action_and_value(
+                _, new_log_probs, entropy, values = self.get_action_and_value(
                     batch_obs, batch_actions
                 )
                 

@@ -69,6 +69,7 @@ class ArcAgiTrainer:
         action_size = self.env.action_space.n
         
         self.agent = PPOAgent(
+            cfg=self.config,
             input_size=obs_size,
             action_size=action_size,
             hidden_size=self.config.network.hidden_size,
