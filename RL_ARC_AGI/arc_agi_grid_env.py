@@ -225,13 +225,6 @@ class ArcAgiGridEnv(gym.Env):
         self.eval_task_list = list(self.eval_task_img_dict.keys())
 
         # observation space에 대한 정의
-        # Dict space gives us structured, human-readable observations
-        # self.observation_space = gym.spaces.Dict(
-        #     {
-        #         "current_grid_img": gym.spaces.Box(low=0, high=10, shape=(30,180), dtype=int),
-        #         "current_grid_seq": gym.spaces.Box(low=0, high=10, shape=(5400,), dtype=int),
-        #     }
-        # )
         self.observation_space = gym.spaces.Box(low=0, high=10, shape=(5400,), dtype=int)
         # action space에 대한 정의 (0~9 색상, 10: 마스크)
         self.action_space = gym.spaces.Discrete(11)
@@ -244,9 +237,6 @@ class ArcAgiGridEnv(gym.Env):
     
     def _get_obs(self) -> Dict:
         return self._current_grid_seq
-                #{
-                #"current_grid_img": self._current_grid_img,
-                #"current_grid_seq": self._current_grid_seq}
 
     def _get_info(self) -> Dict:
         return {
