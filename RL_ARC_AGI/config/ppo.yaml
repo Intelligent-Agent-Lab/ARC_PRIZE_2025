@@ -26,6 +26,7 @@ training:
 
 # Network configuration
 network:
+  type: mlp
   hidden_size: 256
 
 # Logging and saving configuration
