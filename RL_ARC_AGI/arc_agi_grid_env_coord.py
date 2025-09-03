@@ -536,3 +536,26 @@ def create_arc_env_coord(*args, **kwargs):
     base_env = ArcAgiGridEnvCoord(*args, **kwargs)
     wrapped_env = ArcAgiWrapper(base_env)
     return wrapped_env
+
+
+def action_converter(action: int) -> dict:
+    # 0 ~ 899: color 0
+    # 900 ~ 1799: color 1
+    # 1800 ~ 2699: color 2
+    # 2700 ~ 3599: color 3
+    # 3600 ~ 4499: color 4
+    # 4500 ~ 5399: color 5
+    # 5400 ~ 6299: color 6
+    # 6300 ~ 7199: color 7
+    # 7200 ~ 8099: color 8
+    # 8100 ~ 8999: color 9
+    # 9000 ~ 9899: color 10
+    assert (action >= 0 and action < 9900)
+    color = action // 900
+    row = (action - 900*color) // 30
+    col = (action - 900*color) % 30
+    coordinate = (row, col)
+    dict_action = {'color': color, 
+                   'coordinate': coordinate}
+    return dict_action
+    
