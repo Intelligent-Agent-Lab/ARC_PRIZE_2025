@@ -13,7 +13,7 @@ import random
 from matplotlib.colors import ListedColormap, Normalize
 
 cmap = colors.ListedColormap(
-    ['#FFFFFF', # -1: empty
+    [
     '#000000', # 0: black
      '#0074D9', # 1: blue
      '#FF4136', # 2: red
@@ -25,8 +25,9 @@ cmap = colors.ListedColormap(
      '#7FDBFF', # 8: sky
      '#870C25', # 9: brwon
      '#AAAAAA', # 10: mask
+     '#FFFFFF', # 11: empty
      ])
-norm = colors.Normalize(vmin=-1, vmax=10)
+norm = colors.Normalize(vmin=0, vmax=11)
 
 
 def preprocess_data(challenges: Dict[str, Any], solutions: Dict[str, Any]) -> Tuple[Dict[str, List], Dict[str, List]]:
@@ -229,7 +230,7 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
 
         # observation space에 대한 정의
         # Dict space gives us structured, human-readable observations
-        self.observation_space = gym.spaces.Box(low=-1, high=10, shape=(30,180), dtype=int)
+        self.observation_space = gym.spaces.Box(low=0, high=11, shape=(30,180), dtype=int)
 
         # action space에 대한 정의 (0~9 색상, 10: 마스크)
         self.action_space = gym.spaces.Dict({
@@ -295,15 +296,15 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         self.test_input_idx = test_input_idx
         # target grid에서 test solution에 해당하는 부분을 전부 pad_val으로 masking하고 current grid로 할당
         if reset_sol_grid == 'padding':
-            empty_val = -1
+            empty_val = 11
             self._current_grid_img = self._target_grid_img.copy()
             self._current_grid_img[0:30, 150:] = empty_val 
             self._current_grid_seq = self._target_grid_seq.copy()
             self._current_grid_seq[4500:] = empty_val
         elif reset_sol_grid == 'random':
             # ! 여기서 solution에 해당하는 부분을 랜덤으로 초기화해도 좋을듯?
-            rand_grid = np.random.randint(low=-1,
-                                            high=10,
+            rand_grid = np.random.randint(low=0,
+                                            high=11,
                                             size=(30, 30))
             self._current_grid_img = self._target_grid_img.copy()
             self._current_grid_img[0:30, 150:] = rand_grid

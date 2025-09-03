@@ -4,7 +4,7 @@ environment:
   training_solutions_json: "../datasets/arc-agi_training_solutions.json"
   evaluation_challenges_json: "../datasets/arc-agi_evaluation_challenges.json"
   evaluation_solutions_json: "../datasets/arc-agi_evaluation_solutions.json"
-  test_challenges_json: null
+  test_challenges_json: "../datasets/arc-agi_test_challenges.json"
   reset_sol_grid: "padding"
   normalize_obs: false
   reward_shaping: false
@@ -14,19 +14,19 @@ environment:
 # Training configuration
 training:
   num_updates: 50000
-  rollout_steps: 2048
-  mini_batch_size: 256
+  rollout_steps: 600
+  mini_batch_size: 128
   ppo_epochs: 4
   learning_rate: 3e-4
   gamma: 0.999
   gae_lambda: 0.99
   eps_clip: 0.2
   value_coef: 0.5
-  entropy_coef: 0.5
+  entropy_coef: 0.2
 
 # Network configuration
 network:
-  type: mlp
+  type: vit
   hidden_size: 256
 
 # Logging and saving configuration

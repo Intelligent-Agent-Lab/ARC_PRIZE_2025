@@ -15,7 +15,7 @@ class PPOAgent:
     def __init__(self, 
                  cfg,
                  input_size: int = 5400,
-                 action_size: int = 11,
+                 action_size: int = 9900,
                  hidden_size: int = 512,
                  learning_rate: float = 3e-4,
                  gamma: float = 0.99,
@@ -66,11 +66,9 @@ class PPOAgent:
     def select_action(self, observation: np.ndarray) -> Tuple[int, float, float]:
         """Select action using current policy."""
         obs_tensor = torch.FloatTensor(observation).unsqueeze(0).to(self.device)
-        
         with torch.no_grad():
             action, log_prob, entropy, value = self.get_action_and_value(obs_tensor)
-        
-        return action.item(), log_prob.item(), value.item()
+        return action, log_prob.item(), value.item()
     
     def store_transition(self, obs, action, log_prob, reward, value, done):
         """Store transition in rollout buffer."""
