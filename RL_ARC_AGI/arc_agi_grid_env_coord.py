@@ -13,19 +13,20 @@ import random
 from matplotlib.colors import ListedColormap, Normalize
 
 cmap = colors.ListedColormap(
-    ['#000000', # 0: black
+    ['#FFFFFF', # -1: empty
+    '#000000', # 0: black
      '#0074D9', # 1: blue
      '#FF4136', # 2: red
      '#2ECC40', # 3: green
      '#FFDC00', # 4: yello
-     '#AAAAAA', # 5: gray
+     '#8B00FF', # 5: gray
      '#F012BE', # 6: magenta
      '#FF851B', # 7: oragne
      '#7FDBFF', # 8: sky
      '#870C25', # 9: brwon
-     '#FFFFFF', # 10: mask
+     '#AAAAAA', # 10: mask
      ])
-norm = colors.Normalize(vmin=0, vmax=10)
+norm = colors.Normalize(vmin=-1, vmax=10)
 
 
 def preprocess_data(challenges: Dict[str, Any], solutions: Dict[str, Any]) -> Tuple[Dict[str, List], Dict[str, List]]:
@@ -228,7 +229,7 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
 
         # observation space에 대한 정의
         # Dict space gives us structured, human-readable observations
-        self.observation_space = gym.spaces.Box(low=0, high=10, shape=(30,180), dtype=int)
+        self.observation_space = gym.spaces.Box(low=-1, high=10, shape=(30,180), dtype=int)
 
         # action space에 대한 정의 (0~9 색상, 10: 마스크)
         self.action_space = gym.spaces.Dict({
@@ -244,7 +245,7 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         return task_id
 
     def _get_obs(self) -> Dict:
-        return self._current_grid_img
+        return self._current_grid_img.copy()
                 
     def _get_info(self) -> Dict:
         return {
@@ -294,14 +295,14 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         self.test_input_idx = test_input_idx
         # target grid에서 test solution에 해당하는 부분을 전부 pad_val으로 masking하고 current grid로 할당
         if reset_sol_grid == 'padding':
-            pad_val= 10
+            empty_val = -1
             self._current_grid_img = self._target_grid_img.copy()
-            self._current_grid_img[0:30, 150:] = pad_val 
+            self._current_grid_img[0:30, 150:] = empty_val 
             self._current_grid_seq = self._target_grid_seq.copy()
-            self._current_grid_seq[4500:] = pad_val
+            self._current_grid_seq[4500:] = empty_val
         elif reset_sol_grid == 'random':
             # ! 여기서 solution에 해당하는 부분을 랜덤으로 초기화해도 좋을듯?
-            rand_grid = np.random.randint(low=0,
+            rand_grid = np.random.randint(low=-1,
                                             high=10,
                                             size=(30, 30))
             self._current_grid_img = self._target_grid_img.copy()
@@ -335,21 +336,23 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         # Check if agent reached the target
         target_color_img = self._target_grid_img[row, 150+col]
         target_color_seq = self._target_grid_seq[4500+index]
-        
         assert target_color_img == target_color_seq
+        
         terminated = False
         truncated = False
+        
+        # coord에 색칠한 color가 실제 color와 다르다면 종료
         if color != target_color_img:
             terminated = True
             reward = -1
         else:
             reward = 0.01
             terminated = False
+        check_ary = np.unique((self._current_grid_img == self._target_grid_img))
+        if True in check_ary and len(check_ary) == 1:
+            terminated = True 
+            reward = 1 + 0.01
         truncated = (self.timestep == 899)
-        if truncated and not terminated:
-            reward = 1
-        # We don't use truncation in this simple environment
-        # (could add a step limit here if desired)
         observation = self._get_obs()
         info = self._get_info()
         self.timestep += 1
