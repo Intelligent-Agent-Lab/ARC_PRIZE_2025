@@ -17,7 +17,8 @@ from arc_agi_grid_env import create_arc_env
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Import our modules
-from arc_agi_grid_env import ArcAgiGridEnv
+from arc_agi_grid_env_coord import ArcAgiGridEnvCoord, create_arc_env_coord, \
+                                    action_converter
 from ppo_agent import PPOAgent
 from matplotlib import colors
 from pathlib import Path
@@ -34,7 +35,7 @@ class ArcAgiTrainer:
     def setup_environment(self):
         """Setup the training environment."""
         # Create base environment
-        self.env = create_arc_env(
+        self.env = create_arc_env_coord(
             training_challenges_json=self.config.environment.training_challenges_json,
             training_solutions_json=self.config.environment.training_solutions_json,
             evaluation_challenges_json=self.config.environment.evaluation_challenges_json,
@@ -51,8 +52,8 @@ class ArcAgiTrainer:
     def setup_agent(self):
         """Setup the PPO agent."""
         obs_size = self.env.observation_space.shape[0]
-        action_size = self.env.action_space.n
-        
+        action_size = self.env.action_space['color'].n * (self.env.action_space['coordinate'][0].n ** 2)
+        print(f"setup_agent. obs_size: {obs_size}, action_size: {action_size}")
         self.agent = PPOAgent(
             cfg=self.config,
             input_size=obs_size,
@@ -204,7 +205,8 @@ class ArcAgiTrainer:
             action, log_prob, value = self.agent.select_action(obs)
             
             # Take environment step
-            next_obs, reward, terminated, truncated, info = self.env.step(action)
+            dict_action = action_converter(action.cpu().item())
+            next_obs, reward, terminated, truncated, info = self.env.step(dict_action)
             timestep = info['timestep']
             done = terminated or truncated
             print(f"update: {update}, timestep: {timestep}, action: {action}, terminated: {terminated}, truncated: {truncated}")

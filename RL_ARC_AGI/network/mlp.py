@@ -3,9 +3,9 @@ import torch.nn as nn
 class ActorCritic_MLP(nn.Module):
     """Actor-Critic network for PPO with grid sequence observations."""
     
-    def __init__(self, input_size: int = 5400, hidden_size: int = 64, action_size: int = 11):
+    def __init__(self, input_size: int = 5400, hidden_size: int = 64, action_size: int = 9900):
         super(ActorCritic_MLP, self).__init__()
-        self.embedding = nn.Embedding(11, hidden_size)
+        self.embedding = nn.Embedding(12, hidden_size)
         # ! [Batch, 5400, Hidden]
         # Shared layers
         self.shared_layers = nn.Sequential(
@@ -32,6 +32,10 @@ class ActorCritic_MLP(nn.Module):
         )
         
     def forward(self, x):
+        batch_size = x.shape[0]
+        if len(x.shape) >= 2:
+            x = x.view(batch_size, -1)
+            
         """Forward pass returning both action probabilities and state value."""
         x = x.to(int)
         x = self.embedding(x)
