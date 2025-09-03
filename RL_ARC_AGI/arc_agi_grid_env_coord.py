@@ -246,13 +246,6 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
     def _get_obs(self) -> Dict:
         return self._current_grid_img
                 
-                # {"current_grid_img": self._current_grid_img,
-                # "chosen_grid_img": self._chosen_grid_img,
-                # "current_grid_seq": self._current_grid_seq,
-                # "chosen_grid_seq": self._chosen_grid_seq,
-                # }
-
-
     def _get_info(self) -> Dict:
         return {
             'target_grid_img': self._target_grid_img,
