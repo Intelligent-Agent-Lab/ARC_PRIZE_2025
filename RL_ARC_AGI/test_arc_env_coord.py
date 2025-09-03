@@ -56,6 +56,12 @@ obs, info = env.reset(seed=12,
                         options=options)
 test_sol = env.unwrapped._target_grid_seq[4500:]
 total_reward = 0
+
+# %%
+env.plot_target_grid()
+# %%
+env.plot_current_grid()
+# %%
 for t in range(900):
     row = t // 30
     col = t % 30
@@ -72,7 +78,8 @@ for t in range(900):
     total_reward += reward
     if terminated or truncated: 
         break
-env.unwrapped.plot_current_grid()
+env.plot_current_grid()
+
 print(round(total_reward, 2))
 # %%
 env.plot_current_grid()
