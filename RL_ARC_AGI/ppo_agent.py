@@ -65,9 +65,12 @@ class PPOAgent:
         
     def select_action(self, observation: np.ndarray) -> Tuple[int, float, float]:
         """Select action using current policy."""
-        obs_tensor = torch.FloatTensor(observation).unsqueeze(0).to(self.device)
+        
+        # Normalize observation
+        normalized_obs = self._normalize_observation(observation)
+        obs_tensor = torch.FloatTensor(normalized_obs).unsqueeze(0).to(self.device)        
         with torch.no_grad():
-            action, log_prob, entropy, value = self.get_action_and_value(obs_tensor)
+            action, log_prob, entropy, value = self.get_action_and_value(normalized_obs)
         return action, log_prob.item(), value.item()
     
     def store_transition(self, obs, action, log_prob, reward, value, done):
