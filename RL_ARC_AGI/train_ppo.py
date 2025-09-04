@@ -13,6 +13,8 @@ import wandb
 import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 from arc_agi_grid_env import create_arc_env
+from arc_agi_grid_env_coord import action_converter
+
 # Add current directory to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -277,7 +279,9 @@ class ArcAgiTrainer:
                     action_logits, _ = self.agent.ac_network.forward(obs_tensor)
                     action = torch.argmax(action_logits, dim=1).item()
                 
-                obs, reward, terminated, truncated, info = self.env.step(action)
+                # Convert integer action to dictionary format
+                dict_action = action_converter(action)
+                obs, reward, terminated, truncated, info = self.env.step(dict_action)
                 episode_reward += reward
                 done = terminated or truncated
             
