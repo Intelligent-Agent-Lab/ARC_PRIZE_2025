@@ -312,6 +312,10 @@ class ArcAgiGridEnv(gym.Env):
         """
         row = self.timestep // 30
         col = self.timestep % 30
+        
+        # 현재 칸의 값 확인 (action을 취하기 전 값)
+        current_cell_value = self._current_grid_img[row, 150+col]
+        
         self._current_grid_img[row, 150+col] = action # H: 0:30 W: 630:660
         self._current_grid_seq[4500+self.timestep] = action
         
@@ -319,12 +323,21 @@ class ArcAgiGridEnv(gym.Env):
         target_action_img = self._target_grid_img[row, 150+col]
         target_action_seq = self._target_grid_seq[4500+self.timestep]
         assert target_action_img == target_action_seq
+        
         if action != target_action_seq:
             terminated = True
             reward = -1
         else:
-            reward = 0.01
+            # action == target_action_seq인 경우
+            if action != 10:
+                reward = 0.05  # 정답이면서 10이 아닌 경우 0.05 보상
+            else:
+                reward = 0.01  # 정답이지만 10인 경우 기존 보상
             terminated = False
+        
+        # 현재 칸의 값이 11이 아닌 경우 추가 페널티
+        if current_cell_value != 11:
+            reward -= 0.1
         truncated = (self.timestep == (900 - 1))
         if truncated and not terminated:
             reward = 1 + 0.01
