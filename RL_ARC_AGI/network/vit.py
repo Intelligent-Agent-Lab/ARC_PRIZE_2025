@@ -7,7 +7,7 @@ import math
 class PatchEmbedding(nn.Module):
     """Patch embedding layer for ViT adapted to 30x180 input."""
     
-    def __init__(self, grid_size=(30, 180), patch_size=15, embed_dim=768, vocab_size=11):
+    def __init__(self, grid_size=(30, 180), patch_size=15, embed_dim=768, vocab_size=12):
         super().__init__()
         self.grid_size = grid_size
         self.patch_size = patch_size
@@ -42,7 +42,7 @@ class PatchEmbedding(nn.Module):
         
         # Token embedding: [batch, n_patches, patch_size, patch_size, embed_dim]
         # Clamp values to valid token range [0, vocab_size-1] and convert to long
-        patches_clamped = torch.clamp(patches, 0, 10).long()
+        patches_clamped = torch.clamp(patches, 0, 11).long()
         patches = self.token_embedding(patches_clamped)
         
         # Flatten patches: [batch, n_patches, patch_size * patch_size * embed_dim]
