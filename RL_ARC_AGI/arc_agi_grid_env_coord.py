@@ -329,6 +329,10 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         row = coordinate[0]
         col = coordinate[1]
         index = row*30 + col
+        
+        # 현재 칸의 값 확인 (action을 취하기 전 값)
+        current_cell_value = self._current_grid_img[row, 150+col]
+        
         self._current_grid_img[row, 150+col] = color
         self._current_grid_seq[4500+index] = color
         self._chosen_grid_img[row, col] += 1
@@ -347,8 +351,16 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
             terminated = True
             reward = -1
         else:
-            reward = 0.01
+            # color == target_color_img인 경우
+            if color != 10:
+                reward = 0.05  # 정답이면서 10이 아닌 경우 0.05 보상
+            else:
+                reward = 0.01  # 정답이지만 10인 경우 기존 보상
             terminated = False
+        
+        # 현재 칸의 값이 11이 아닌 경우 추가 페널티
+        if current_cell_value != 11:
+            reward -= 0.1
         check_ary = np.unique((self._current_grid_img == self._target_grid_img))
         if True in check_ary and len(check_ary) == 1:
             terminated = True 
