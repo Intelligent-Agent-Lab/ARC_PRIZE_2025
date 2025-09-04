@@ -30,9 +30,6 @@ class PatchEmbedding(nn.Module):
     def forward(self, x):
         batch_size = x.shape[0]
         
-        # Input is already [batch, 30, 180]
-        # x = x.view(batch_size, self.grid_size[0], self.grid_size[1])
-        
         # Convert to patches: [batch, n_patches, patch_size, patch_size]
         patches = []
         for i in range(0, self.grid_size[0], self.patch_size):
