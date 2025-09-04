@@ -30,8 +30,8 @@ class PatchEmbedding(nn.Module):
     def forward(self, x):
         batch_size = x.shape[0]
         
-        # Reshape to grid: [batch, 30, 180]
-        x = x.view(batch_size, self.grid_size[0], self.grid_size[1])
+        # Input is already [batch, 30, 180]
+        # x = x.view(batch_size, self.grid_size[0], self.grid_size[1])
         
         # Convert to patches: [batch, n_patches, patch_size, patch_size]
         patches = []
@@ -44,7 +44,9 @@ class PatchEmbedding(nn.Module):
         patches = torch.stack(patches, dim=1)
         
         # Token embedding: [batch, n_patches, patch_size, patch_size, embed_dim]
-        patches = self.token_embedding(patches.long())
+        # Clamp values to valid token range [0, vocab_size-1] and convert to long
+        patches_clamped = torch.clamp(patches, 0, 10).long()
+        patches = self.token_embedding(patches_clamped)
         
         # Flatten patches: [batch, n_patches, patch_size * patch_size * embed_dim]
         patches = patches.view(batch_size, self.n_patches, -1)

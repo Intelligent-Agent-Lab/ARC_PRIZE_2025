@@ -72,7 +72,7 @@ class PPOAgent:
         
         # Initialize observation normalization
         if self.normalize_obs:
-            self.obs_rms = RunningMeanStd(shape=(input_size,))
+            self.obs_rms = RunningMeanStd(shape=(30, 180))
             
         # Initialize reward normalization
         if self.normalize_reward:
@@ -155,8 +155,10 @@ class PPOAgent:
         
         # Normalize observation
         normalized_obs = self._normalize_observation(observation)
+        # Convert to tensor
+        obs_tensor = torch.FloatTensor(normalized_obs).unsqueeze(0).to(self.device)
         with torch.no_grad():
-            action, log_prob, entropy, value = self.get_action_and_value(normalized_obs)
+            action, log_prob, entropy, value = self.get_action_and_value(obs_tensor)
         return action, log_prob.item(), value.item()
     
     def store_transition(self, obs, action, log_prob, reward, value, done):
