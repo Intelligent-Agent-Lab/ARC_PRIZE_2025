@@ -653,7 +653,7 @@ def vectorized_action_converter(actions: torch.Tensor) -> dict:
     
     # 결과를 딕셔너리로 반환
     result = {
-        'colors': colors.numpy(),
-        'coordinates': torch.stack([rows, cols], dim=-1).numpy()  # (N, 2) 형태
+        'color': colors.numpy(),
+        'coordinate': torch.stack([rows, cols], dim=-1).numpy()  # (N, 2) 형태
     }
     return result
