@@ -20,7 +20,9 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Import our modules
 from arc_agi_grid_env_coord import ArcAgiGridEnvCoord, create_arc_env_coord, \
-                                    action_converter
+                                    action_converter, \
+                                    load_challenges_and_solutions, \
+                                    preprocess_data
 from ppo_agent import PPOAgent
 from matplotlib import colors
 from pathlib import Path
@@ -37,15 +39,43 @@ class ArcAgiTrainer:
     def setup_environment(self):
         """Setup the training environment."""
         # Create base environment
-        self.env = create_arc_env_coord(
-            training_challenges_json=self.config.environment.training_challenges_json,
-            training_solutions_json=self.config.environment.training_solutions_json,
-            evaluation_challenges_json=self.config.environment.evaluation_challenges_json,
-            evaluation_solutions_json=self.config.environment.evaluation_solutions_json,
-            test_challenges_json=self.config.environment.test_challenges_json
-            )
+        training_challenges_json="../datasets/arc-agi_training_challenges.json"
+        training_solutions_json="../datasets/arc-agi_training_solutions.json" 
+        evaluation_challenges_json="../datasets/arc-agi_evaluation_challenges.json"
+        evaluation_solutions_json="../datasets/arc-agi_evaluation_solutions.json"
+        test_challenges_json="../datasets/arc-agi_test_challenges.json"
+
+        training_challenges, training_solutions, evaluation_challenges, \
+        evaluation_solutions, test_challenges = load_challenges_and_solutions(
+                                                training_challenges_json,
+                                                training_solutions_json,
+                                                evaluation_challenges_json,
+                                                evaluation_solutions_json,
+                                                test_challenges_json,
+                                            )
+        train_task_img_dict, _ = preprocess_data(training_challenges, training_solutions)
+        eval_task_img_dict, _ = preprocess_data(evaluation_challenges, evaluation_solutions)
+
         self.task_id_list = list(self.config.environment.task_id_list)
         self.seed = self.config.environment.seed
+        self.fixed_task = self.config.environment.fixed_task
+        self.fixed_pair_idx = self.config.environment.fixed_pair_idx
+        self.task_id = self.config.environment.task_id
+        self.pair_idx = self.config.environment.pair_idx
+        
+        self.env = create_arc_env_coord(
+                    fixed_task=self.fixed_task, 
+                    fixed_pair_idx=self.fixed_pair_idx,
+                    task_id=self.task_id,
+                    pair_idx=self.pair_idx,
+                    training_challenges=training_challenges,
+                    training_solutions=training_solutions, 
+                    evaluation_challenges=evaluation_solutions,
+                    evaluation_solutions=evaluation_solutions,
+                    test_challenges=test_challenges,
+                    train_task_img_dict=train_task_img_dict,
+                    eval_task_img_dict=eval_task_img_dict,
+                )
 
         print(f"Environment created successfully!")
         print(f"Observation space: {self.env.observation_space}")
@@ -421,7 +451,7 @@ class ArcAgiTrainer:
             self.tensorboard_writer.close()
 
 
-@hydra.main(version_base=None, config_path="config", config_name="ppo")
+@hydra.main(version_base=None, config_path="config", config_name="ppo_one_task")
 def main(cfg: DictConfig) -> None:
     """Main training function with Hydra configuration."""
     print("Training configuration:")

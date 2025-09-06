@@ -203,28 +203,47 @@ def preprocess_data_generator(challenges: Dict[str, Any], solutions: Dict[str, A
 
 from arc_agi_grid_env import ArcAgiGridEnv
 
+def load_challenges_and_solutions(
+                                    training_challenges_json: str,
+                                    training_solutions_json: str,
+                                    evaluation_challenges_json: str,
+                                    evaluation_solutions_json: str,
+                                    test_challenges_json: str,
+                                    ) -> Tuple:
+    # training, evaluation, test challenge 및 solution들을 불러오기
+    with open(training_challenges_json, 'r', encoding='utf-8') as file:
+        training_challenges = json.load(file)
+    with open(training_solutions_json, 'r', encoding='utf-8') as file:
+        training_solutions = json.load(file)
+    with open(evaluation_challenges_json, 'r', encoding='utf-8') as file:
+        evaluation_challenges = json.load(file)
+    with open(evaluation_solutions_json, 'r', encoding='utf-8') as file:
+        evaluation_solutions = json.load(file)
+    with open(test_challenges_json, 'r', encoding='utf-8') as file:
+        test_challenges = json.load(file)
+    return training_challenges, training_solutions, \
+            evaluation_challenges, evaluation_solutions, test_challenges
+                
+# self.train_task_img_dict, self.train_task_seq_dict = preprocess_data(self.training_challenges, self.training_solutions)
+# self.eval_task_img_dict, self.eval_task_seq_dict = preprocess_data(self.evaluation_challenges, self.evaluation_solutions)
 
 class ArcAgiGridEnvCoord(ArcAgiGridEnv):
     def __init__(self,
-                 training_challenges_json: str,
-                 training_solutions_json: str,
-                 evaluation_challenges_json: str,
-                 evaluation_solutions_json: str,
-                 test_challenges_json: str,
-                 ):
-        # training, evaluation, test challenge 및 solution들을 불러오기
-        with open(training_challenges_json, 'r', encoding='utf-8') as file:
-            self.training_challenges = json.load(file)
-        with open(training_solutions_json, 'r', encoding='utf-8') as file:
-            self.training_solutions = json.load(file)
-        with open(evaluation_challenges_json, 'r', encoding='utf-8') as file:
-            self.evaluation_challenges = json.load(file)
-        with open(evaluation_solutions_json, 'r', encoding='utf-8') as file:
-            self.evaluation_solutions = json.load(file)
-        with open(test_challenges_json, 'r', encoding='utf-8') as file:
-            self.test_challenges = json.load(file)
-        self.train_task_img_dict, self.train_task_seq_dict = preprocess_data(self.training_challenges, self.training_solutions)
-        self.eval_task_img_dict, self.eval_task_seq_dict = preprocess_data(self.evaluation_challenges, self.evaluation_solutions)
+                training_challenges,
+                training_solutions,
+                evaluation_challenges,
+                evaluation_solutions,
+                test_challenges,
+                train_task_img_dict,
+                eval_task_img_dict,
+                ):
+        self.training_challenges = training_challenges
+        self.training_solutions = training_solutions
+        self.evaluation_challenges = evaluation_challenges
+        self.evaluation_solutions = evaluation_solutions
+        self.test_challenges = test_challenges
+        self.train_task_img_dict = train_task_img_dict
+        self.eval_task_img_dict = eval_task_img_dict
         self.train_task_list = list(self.train_task_img_dict.keys())
         self.eval_task_list = list(self.eval_task_img_dict.keys())
 
@@ -251,27 +270,31 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
     def _get_info(self) -> Dict:
         return {
             'target_grid_img': self._target_grid_img,
-            'target_grid_seq': self._target_grid_seq,
             'timestep': self.timestep,
             'task_id': self.task_id,
             'test_input_idx': self.test_input_idx,
             "current_grid_img": self._current_grid_img,
             "chosen_grid_img": self._chosen_grid_img,
-            "current_grid_seq": self._current_grid_seq,
-            "chosen_grid_seq": self._chosen_grid_seq,
         }
 
     def reset(self,
               seed: Optional[int] = None,
               options: Optional[dict] = None):
-        mode = options['mode']
-        task_id = options['task_id']
-        reset_sol_grid = options['reset_sol_grid']
-        
+        task_id = None
+        pair_idx = None
+        if options != None:
+            mode = options['mode']
+            task_id = options['task_id']
+            pair_idx = options['pair_idx']
+            reset_sol_grid = options['reset_sol_grid']
+            self.task_id = task_id
+            self.pair_idx = pair_idx
+    
         self.timestep = 0
         if task_id == None:
             task_id = self._select_task(seed)
-        self.task_id = task_id
+            self.task_id = task_id
+            
         """
         Args:
             seed: Random seed for reproducible episodes
@@ -285,22 +308,24 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         random.seed(seed)
         np.random.seed(seed)
         # task_id에 해당하는 target grid 선택 (test input이 여러 개 존재 가능하므로 한 번 더 random.choice 수행
-        if mode == 'train':
-            test_input_idx = random.choice(list(range(len(self.train_task_img_dict[task_id]))))
-            self._target_grid_img = self.train_task_img_dict[task_id][test_input_idx]
-            self._target_grid_seq = self.train_task_seq_dict[task_id][test_input_idx]
-        elif mode == 'evaluation' or mode == 'eval':
-            test_input_idx = random.choice(list(range(len(self.eval_task_img_dict[task_id]))))
-            self._target_grid_img = self.eval_task_img_dict[task_id][test_input_idx]
-            self._target_grid_seq = self.eval_task_seq_dict[task_id][test_input_idx]
-        self.test_input_idx = test_input_idx
+        if pair_idx == None:
+            if mode == 'train':
+                pair_idx = random.choice(list(range(len(self.train_task_img_dict[task_id]))))
+                self._target_grid_img = self.train_task_img_dict[task_id][pair_idx]
+            elif mode == 'evaluation' or mode == 'eval':
+                pair_idx = random.choice(list(range(len(self.eval_task_img_dict[task_id]))))
+                self._target_grid_img = self.eval_task_img_dict[task_id][pair_idx]
+        else:
+            if mode == 'train':
+                self._target_grid_img = self.train_task_img_dict[task_id][pair_idx]
+            elif mode == 'evaluation' or mode == 'eval':
+                self._target_grid_img = self.eval_task_img_dict[task_id][pair_idx]
+        self.test_input_idx = pair_idx
         # target grid에서 test solution에 해당하는 부분을 전부 pad_val으로 masking하고 current grid로 할당
         if reset_sol_grid == 'padding':
             empty_val = 11
             self._current_grid_img = self._target_grid_img.copy()
             self._current_grid_img[0:30, 150:] = empty_val 
-            self._current_grid_seq = self._target_grid_seq.copy()
-            self._current_grid_seq[4500:] = empty_val
         elif reset_sol_grid == 'random':
             # ! 여기서 solution에 해당하는 부분을 랜덤으로 초기화해도 좋을듯?
             rand_grid = np.random.randint(low=0,
@@ -308,11 +333,8 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
                                             size=(30, 30))
             self._current_grid_img = self._target_grid_img.copy()
             self._current_grid_img[0:30, 150:] = rand_grid
-            self._current_grid_seq = self._target_grid_seq.copy()
-            self._current_grid_seq[4500:] = rand_grid.flatten()
 
         self._chosen_grid_img = np.zeros([30, 30]).astype(int)
-        self._chosen_grid_seq = np.zeros([900]).astype(int)
         observation = self._get_obs()
         info = self._get_info()
         return observation, info
@@ -334,14 +356,10 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         current_cell_value = self._current_grid_img[row, 150+col]
         
         self._current_grid_img[row, 150+col] = color
-        self._current_grid_seq[4500+index] = color
         self._chosen_grid_img[row, col] += 1
-        self._chosen_grid_seq[index] += 1
 
         # Check if agent reached the target
         target_color_img = self._target_grid_img[row, 150+col]
-        target_color_seq = self._target_grid_seq[4500+index]
-        assert target_color_img == target_color_seq
         
         terminated = False
         truncated = False
@@ -511,8 +529,40 @@ class ArcAgiWrapper(Wrapper):
     while maintaining compatibility with Gymnasium's interface.
     """
     
-    def __init__(self, env):
+    def __init__(self, env, 
+                 fixed_task: bool, 
+                 fixed_pair_idx: bool, 
+                task_id: str,
+                pair_idx: int,):
         super().__init__(env)
+        self.fixed_task = fixed_task
+        self.fixed_pair_idx = fixed_pair_idx
+        self.task_id = task_id
+        self.pair_idx = pair_idx
+    
+    def reset(self, *args, **kwargs,):
+        if self.fixed_task and not self.fixed_pair_idx:
+            options = {'mode': 'train',
+                    'task_id': self.task_id, # 794b24be, 3cd86f4f
+                    'pair_idx': None, 
+                    'reset_sol_grid': 'padding',}
+        elif self.fixed_task and self.fixed_pair_idx:
+            options = {'mode': 'train',
+                    'task_id': self.task_id, # 794b24be, 3cd86f4f
+                    'pair_idx': self.pair_idx, 
+                    'reset_sol_grid': 'padding',}
+        elif not self.fixed_task and self.fixed_pair_idx:
+            options = {'mode': 'train',
+                    'task_id': None, # 794b24be, 3cd86f4f
+                    'pair_idx': self.pair_idx, 
+                    'reset_sol_grid': 'padding',}
+        else:
+            options = {'mode': 'train',
+                    'task_id': None, # 794b24be, 3cd86f4f
+                    'pair_idx': None, 
+                    'reset_sol_grid': 'padding',}
+        # task_id를 항상 포함시켜서 reset 호출
+        return self.env.reset(options=options,)
     
     def __getattr__(self, name):
         """
@@ -543,11 +593,20 @@ class ArcAgiWrapper(Wrapper):
     def plot_padded_task(self, task_id, i, w=0.5):
         return self.env.plot_padded_task(task_id, i, w)
 
+
 # 사용 예시
-def create_arc_env_coord(*args, **kwargs):
+def create_arc_env_coord(
+                        fixed_task: bool, 
+                        fixed_pair_idx: bool,
+                        task_id: str,
+                        pair_idx: int, *args, **kwargs):
     """Factory function to create ARC environment with custom wrapper"""
     base_env = ArcAgiGridEnvCoord(*args, **kwargs)
-    wrapped_env = ArcAgiWrapper(base_env)
+    wrapped_env = ArcAgiWrapper(base_env, 
+                                fixed_task, 
+                                fixed_pair_idx,
+                                task_id,
+                                pair_idx,)
     return wrapped_env
 
 
