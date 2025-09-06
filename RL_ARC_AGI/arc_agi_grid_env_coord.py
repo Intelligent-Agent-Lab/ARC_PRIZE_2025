@@ -11,6 +11,7 @@ from matplotlib import colors
 import matplotlib.pyplot as plt
 import random
 from matplotlib.colors import ListedColormap, Normalize
+import torch 
 
 cmap = colors.ListedColormap(
     [
@@ -631,3 +632,31 @@ def action_converter(action: int) -> dict:
                    'coordinate': coordinate}
     return dict_action
     
+
+def vectorized_action_converter(actions: torch.Tensor) -> dict:
+    """벡터화된 함수 (텐서용)"""
+    # 입력 검증
+    assert torch.all((actions >= 0) & (actions < 9900)), "All actions must be in range [0, 9900)"
+    
+    # 벡터화된 계산
+    # color = action // 900
+    colors = torch.div(actions, 900, rounding_mode='floor')
+    
+    # remainder = action - 900 * color  
+    remainders = actions - 900 * colors
+    
+    # row = remainder // 30
+    rows = torch.div(remainders, 30, rounding_mode='floor')
+    
+    # col = remainder % 30
+    cols = remainders % 30
+    
+    # 결과를 딕셔너리로 반환
+    result = {
+        'colors': colors.numpy(),
+        'rows': rows.numpy(), 
+        'cols': cols.numpy(),
+        'coordinates': torch.stack([rows, cols], dim=-1).numpy()  # (N, 2) 형태
+    }
+    
+    return result
