@@ -3,6 +3,7 @@ from typing import Optional
 import numpy as np
 import gymnasium as gym
 from gymnasium import Wrapper
+from gymnasium.wrappers import Autoreset
 from itertools import permutations, product
 import json
 from typing import Tuple, Dict, Union, List, Any
@@ -276,6 +277,8 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
             'test_input_idx': self.test_input_idx,
             "current_grid_img": self._current_grid_img,
             "chosen_grid_img": self._chosen_grid_img,
+            "episode_returns": self.episode_returns,
+            "episode_lengths": self.episode_lengths,
         }
 
     def reset(self,
@@ -296,6 +299,8 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
             task_id = self._select_task(seed)
             self.task_id = task_id
             
+        self.episode_returns = 0
+        self.episode_lengths = 0
         """
         Args:
             seed: Random seed for reproducible episodes
@@ -388,6 +393,9 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         observation = self._get_obs()
         info = self._get_info()
         self.timestep += 1
+        self.episode_returns += reward
+        self.episode_lengths += 1
+        
         return observation, reward, terminated, truncated, info
 
     def plot_chosen_grid(self,):

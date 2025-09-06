@@ -57,6 +57,7 @@ test_sol.shape
 # %%
 env.plot_current_grid()
 # %%
+total_reward = 0
 for t in range(900):
     row = t // 30
     col = t % 30
@@ -64,7 +65,7 @@ for t in range(900):
               'coordinate': [row, col]
               }
     
-    if t > 898:
+    if t > 899:
         action = env.action_space.sample()
         print(f"last action: {action}")
     print(action)

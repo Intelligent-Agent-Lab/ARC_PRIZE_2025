@@ -22,6 +22,10 @@ dict_action = action_converter(action.cpu().item())
 print(dict_action)
 
 # %%
-action = torch.tensor([899, 1899, 3899, 9899])
+v_action = torch.tensor([899, 1899, 3899, 9899])
 
+# %%
+dict_v_action = vectorized_action_converter(v_action)
+# %%
+dict_v_action
 # %%
