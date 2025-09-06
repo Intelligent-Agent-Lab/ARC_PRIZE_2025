@@ -82,17 +82,17 @@ def make_env(fixed_task: bool,
              ):
     def thunk():
         env = create_arc_env_coord(
-            fixed_task=True, 
-            fixed_pair_idx=False,
-            task_id='3cd86f4f', # '3cd86f4f'
-            pair_idx=None,# 0
-            training_challenges="../datasets/arc-agi_training_challenges.json",
-            training_solutions="../datasets/arc-agi_training_solutions.json", 
-            evaluation_challenges="../datasets/arc-agi_evaluation_challenges.json",
-            evaluation_solutions="../datasets/arc-agi_evaluation_solutions.json",
-            test_challenges="../datasets/arc-agi_test_challenges.json",
-            train_task_img_dict=train_task_img_dict,
-            eval_task_img_dict=eval_task_img_dict,
+                fixed_task=True, 
+                fixed_pair_idx=True,
+                task_id='794b24be',
+                pair_idx=None,
+                training_challenges=training_challenges,
+                training_solutions=training_solutions, 
+                evaluation_challenges=evaluation_solutions,
+                evaluation_solutions=evaluation_solutions,
+                test_challenges=test_challenges,
+                train_task_img_dict=train_task_img_dict,
+                eval_task_img_dict=eval_task_img_dict,
             )
         # env = gym.wrappers.RecordEpisodeStatistics(env)
         return env
