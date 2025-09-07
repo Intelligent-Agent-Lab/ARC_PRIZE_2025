@@ -226,9 +226,6 @@ def load_challenges_and_solutions(
     return training_challenges, training_solutions, \
             evaluation_challenges, evaluation_solutions, test_challenges
                 
-# self.train_task_img_dict, self.train_task_seq_dict = preprocess_data(self.training_challenges, self.training_solutions)
-# self.eval_task_img_dict, self.eval_task_seq_dict = preprocess_data(self.evaluation_challenges, self.evaluation_solutions)
-
 class ArcAgiGridEnvCoord(ArcAgiGridEnv):
     def __init__(self,
                 training_challenges,
@@ -288,16 +285,13 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         pair_idx = None
         if options != None:
             mode = options['mode']
-            task_id = options['task_id']
-            pair_idx = options['pair_idx']
+            self.task_id = options['task_id']
+            self.pair_idx = options['pair_idx']
             reset_sol_grid = options['reset_sol_grid']
-            self.task_id = task_id
-            self.pair_idx = pair_idx
     
         self.timestep = 0
         if task_id == None:
-            task_id = self._select_task(seed)
-            self.task_id = task_id
+            self.task_id = self._select_task(seed)
             
         self.episode_returns = 0
         self.episode_lengths = 0
@@ -314,19 +308,19 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         random.seed(seed)
         np.random.seed(seed)
         # task_id에 해당하는 target grid 선택 (test input이 여러 개 존재 가능하므로 한 번 더 random.choice 수행
-        if pair_idx == None:
+        if self.pair_idx == None:
             if mode == 'train':
-                pair_idx = random.choice(list(range(len(self.train_task_img_dict[task_id]))))
-                self._target_grid_img = self.train_task_img_dict[task_id][pair_idx]
+                self.pair_idx = random.choice(list(range(len(self.train_task_img_dict[self.task_id]))))
+                self._target_grid_img = self.train_task_img_dict[self.task_id][self.pair_idx]
             elif mode == 'evaluation' or mode == 'eval':
-                pair_idx = random.choice(list(range(len(self.eval_task_img_dict[task_id]))))
-                self._target_grid_img = self.eval_task_img_dict[task_id][pair_idx]
+                self.pair_idx = random.choice(list(range(len(self.eval_task_img_dict[self.task_id]))))
+                self._target_grid_img = self.eval_task_img_dict[self.task_id][self.pair_idx]
         else:
             if mode == 'train':
-                self._target_grid_img = self.train_task_img_dict[task_id][pair_idx]
+                self._target_grid_img = self.train_task_img_dict[self.task_id][self.pair_idx]
             elif mode == 'evaluation' or mode == 'eval':
-                self._target_grid_img = self.eval_task_img_dict[task_id][pair_idx]
-        self.test_input_idx = pair_idx
+                self._target_grid_img = self.eval_task_img_dict[self.task_id][self.pair_idx]
+        self.test_input_idx = self.pair_idx
         # target grid에서 test solution에 해당하는 부분을 전부 pad_val으로 masking하고 current grid로 할당
         if reset_sol_grid == 'padding':
             empty_val = 11

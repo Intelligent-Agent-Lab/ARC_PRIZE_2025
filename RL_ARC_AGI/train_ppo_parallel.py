@@ -290,7 +290,6 @@ class ArcAgiVectorizedTrainer:
 
             # Execute actions in vectorized environment
             dict_action = vectorized_action_converter(action.cpu())
-            # print(f'step: {step}. {dict_action}')
             next_obs, reward, terminations, truncations, infos = self.envs.step(dict_action)
             next_done = np.logical_or(terminations, truncations)
             self.rewards[step] = torch.tensor(reward).to(self.device).view(-1)
