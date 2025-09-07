@@ -1,5 +1,5 @@
 # %%
-from arc_agi_grid_env_coord import action_converter
+from arc_agi_grid_env_coord import action_converter, vectorized_action_converter
 
 dict_action = action_converter(0)
 print(dict_action)
@@ -20,3 +20,12 @@ import torch
 action = torch.tensor(899)
 dict_action = action_converter(action.cpu().item())
 print(dict_action)
+
+# %%
+v_action = torch.tensor([899, 1899, 3899, 9899])
+
+# %%
+dict_v_action = vectorized_action_converter(v_action)
+# %%
+dict_v_action
+# %%

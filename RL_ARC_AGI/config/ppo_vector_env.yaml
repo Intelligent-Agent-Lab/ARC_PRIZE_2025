@@ -1,0 +1,65 @@
+# Environment configuration
+environment:
+  training_challenges_json: "../datasets/arc-agi_training_challenges.json"
+  training_solutions_json: "../datasets/arc-agi_training_solutions.json"
+  evaluation_challenges_json: "../datasets/arc-agi_evaluation_challenges.json"
+  evaluation_solutions_json: "../datasets/arc-agi_evaluation_solutions.json"
+  test_challenges_json: "../datasets/arc-agi_test_challenges.json"
+  reset_sol_grid: "padding"
+  normalize_obs: false
+  reward_shaping: false
+  task_id_list: ['794b24be', '3cd86f4f'] # Multiple tasks for varied training
+  fixed_task: true
+  fixed_pair_idx: true
+  task_id: '3cd86f4f'
+  pair_idx: 0
+  seed: 42
+  
+  # Vectorized environment specific settings
+  num_envs: 4  # Number of parallel environments
+  num_steps: 128  # Number of steps per environment per rollout
+
+# Training configuration
+training:
+  total_timesteps: 500000  # Total training timesteps
+  rollout_steps: 512  # Total steps across all environments per update (num_envs * num_steps)
+  mini_batch_size: 64  # Smaller mini-batches for vectorized training
+  ppo_epochs: 4
+  learning_rate: 2.5e-4  # Standard PPO learning rate
+  gamma: 0.99
+  gae_lambda: 0.95
+  eps_clip: 0.2
+  value_coef: 0.5
+  entropy_coef: 0.01
+  max_grad_norm: 0.5
+  anneal_lr: true  # Learning rate annealing
+  
+  # Additional PPO hyperparameters for vectorized training
+  norm_adv: true  # Advantage normalization
+  clip_vloss: true  # Value function clipping
+  target_kl: null  # Target KL divergence (null means no early stopping)
+  num_minibatches: 16  # Number of mini-batches for optimization
+
+# Network configuration
+network:
+  type: vit
+  hidden_size: 256
+  # Vision Transformer specific parameters
+  patch_size: 15
+  embed_dim: 768
+  num_heads: 12
+  num_layers: 12
+  mlp_ratio: 4
+  dropout: 0.1
+
+# Logging and saving configuration
+logging:
+  log_interval: 1
+  eval_interval: 100
+  eval_episodes: 10
+  save_interval: 500
+  save_dir: "models/vectorized"
+  visualize_period: 2
+  use_wandb: true
+  use_tensorboard: true
+  wandb_project: "arc_agi_ppo_vectorized"
