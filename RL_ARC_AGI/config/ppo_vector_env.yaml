@@ -22,8 +22,6 @@ environment:
 # Training configuration
 training:
   total_timesteps: 500000  # Total training timesteps
-  rollout_steps: 512  # Total steps across all environments per update (num_envs * num_steps)
-  mini_batch_size: 64  # Smaller mini-batches for vectorized training
   ppo_epochs: 4
   learning_rate: 2.5e-4  # Standard PPO learning rate
   gamma: 0.99
@@ -38,7 +36,7 @@ training:
   norm_adv: true  # Advantage normalization
   clip_vloss: true  # Value function clipping
   target_kl: null  # Target KL divergence (null means no early stopping)
-  num_minibatches: 16  # Number of mini-batches for optimization
+  num_minibatches: 8  # Number of mini-batches for optimization
 
 # Network configuration
 network:
