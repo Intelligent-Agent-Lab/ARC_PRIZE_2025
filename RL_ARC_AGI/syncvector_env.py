@@ -57,7 +57,6 @@ test_sol.shape
 # %%
 env.plot_current_grid()
 # %%
-total_reward = 0
 for t in range(900):
     row = t // 30
     col = t % 30
@@ -74,6 +73,7 @@ for t in range(900):
     total_reward += reward
     if terminated or truncated: 
         break
+print(total_reward)
 env.plot_current_grid()
 # %%
 def make_env(fixed_task: bool, 
