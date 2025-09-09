@@ -458,7 +458,7 @@ class ArcAgiVectorizedTrainer:
                 
                 print(f"\nIteration {iteration}/{num_iterations}")
                 print(f"Global step: {global_step}")
-                print(f"Last return: {self.episode_return[-1]:.3f}")
+                print(f"Last return: {self.episode_returns[-1]:.3f}")
                 print(f"Mean reward (last {self.config.environment.num_envs} episodes): {mean_reward:.3f}")
                 print(f"Mean episode length: {mean_length:.1f}")
                 print(f"Success rate: {success_rate:.3f}")
