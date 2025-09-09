@@ -34,7 +34,24 @@ from cleanrl_utils.atari_wrappers import (  # isort:skip
     NoopResetEnv,
 )
 
+
 def make_env(env_id, idx, capture_video, run_name):
+    def thunk():
+        if capture_video and idx == 0:
+            env = gym.make(env_id, render_mode="rgb_array")
+            env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
+        else:
+            env = gym.make(env_id)
+        env = gym.wrappers.TimeLimit(env, 500)
+        # env = gym.wrappers.Autoreset(env, )
+        env = gym.wrappers.RecordEpisodeStatistics(env)
+        
+        return env
+
+    return thunk
+
+
+def make_atari_env(env_id, idx, capture_video, run_name):
     def thunk():
         if capture_video and idx == 0:
             env = gym.make(env_id, render_mode="rgb_array")
@@ -62,7 +79,36 @@ def layer_init(layer, std=np.sqrt(2), bias_const=0.0):
     return layer
 
 
-class Agent(nn.Module):
+class MLPAgent(nn.Module):
+    def __init__(self, envs):
+        super().__init__()
+        self.critic = nn.Sequential(
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
+            nn.Tanh(),
+            layer_init(nn.Linear(64, 64)),
+            nn.Tanh(),
+            layer_init(nn.Linear(64, 1), std=1.0),
+        )
+        self.actor = nn.Sequential(
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
+            nn.Tanh(),
+            layer_init(nn.Linear(64, 64)),
+            nn.Tanh(),
+            layer_init(nn.Linear(64, envs.single_action_space.n), std=0.01),
+        )
+
+    def get_value(self, x):
+        return self.critic(x)
+
+    def get_action_and_value(self, x, action=None):
+        logits = self.actor(x)
+        probs = Categorical(logits=logits)
+        if action is None:
+            action = probs.sample()
+        return action, probs.log_prob(action), probs.entropy(), self.critic(x)
+
+
+class CNNAgent(nn.Module):
     """Vision Transformer based Actor-Critic network for PPO with grid observations."""
     
     def __init__(self, envs):
@@ -80,10 +126,6 @@ class Agent(nn.Module):
         )
         self.actor = layer_init(nn.Linear(512, envs.single_action_space.n), std=0.01)
         self.critic = layer_init(nn.Linear(512, 1), std=1)
-        
-    def forward(self, x):
-        action_logits, state_value = self.ac_network(x)
-        return action_logits, state_value 
        
     def get_value(self, x):
         return self.critic(self.network(x / 255.0))
@@ -117,11 +159,17 @@ class ArcAgiVectorizedTrainer:
         
         # Create vectorized environment
         run_name = f"{self.config.environment.env_id}__{self.config.environment.seed}__{int(time.time())}"
-        
-        self.envs = gym.vector.SyncVectorEnv(
-        [make_env(self.config.environment.env_id, i, self.config.environment.capture_video, run_name) for i in range(self.config.environment.num_envs)],
-        )
-
+        if 'ALE' in self.config.environment.env_id:
+            self.envs = gym.vector.AsyncVectorEnv(
+            [make_atari_env(self.config.environment.env_id, i, self.config.environment.capture_video, run_name) for i in range(self.config.environment.num_envs)],
+                autoreset_mode=gym.vector.AutoresetMode.NEXT_STEP,
+            )
+        else:
+            self.envs = gym.vector.AsyncVectorEnv(
+                [make_env(self.config.environment.env_id, i, self.config.environment.capture_video, run_name) for i in range(self.config.environment.num_envs)],
+                autoreset_mode=gym.vector.AutoresetMode.NEXT_STEP,
+            )
+            
         print(f"Vectorized environments created successfully!")
         print(f"Number of environments: {self.num_envs}")
         print(f"Single observation space: {self.envs.single_observation_space}")
@@ -140,9 +188,13 @@ class ArcAgiVectorizedTrainer:
         
         # Set device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
+        print(self.device)
         # Create agent
-        self.agent = Agent(self.envs).to(self.device)
+        if 'ALE' in self.config.environment.env_id:
+            self.agent = CNNAgent(self.envs).to(self.device)
+        else:
+            self.agent = MLPAgent(self.envs).to(self.device)
+            
         
         # Create optimizer
         self.optimizer = optim.Adam(
@@ -156,9 +208,9 @@ class ArcAgiVectorizedTrainer:
         
     def setup_logging(self):
         """Setup logging and metrics tracking."""
-        self.episode_rewards = deque(maxlen=5)
-        self.episode_lengths = deque(maxlen=5)
-        self.success_rate = deque(maxlen=5)
+        self.episode_returns = deque(maxlen=self.config.environment.num_envs)
+        self.episode_lengths = deque(maxlen=self.config.environment.num_envs)
+        self.success_rate = deque(maxlen=self.config.environment.num_envs)
         
         # Create save directory
         os.makedirs(self.config.logging.save_dir, exist_ok=True)
@@ -199,17 +251,11 @@ class ArcAgiVectorizedTrainer:
         self.current_episode_returns = np.zeros(self.num_envs)
         self.current_episode_lengths = np.zeros(self.num_envs)
         
-    def collect_rollouts(self, iteration: int):
+    def collect_rollouts(self, next_obs, next_done, iteration: int):
         """Collect rollout data for training using vectorized environments."""
         # Reset environments
-        next_obs, _ = self.envs.reset(seed=self.seed)
-        next_obs = torch.Tensor(next_obs).to(self.device)
-        next_done = torch.zeros(self.num_envs).to(self.device)
-        
+
         # Reset episode tracking
-        self.current_episode_returns = np.zeros(self.num_envs)
-        self.current_episode_lengths = np.zeros(self.num_envs)
-        
         for step in range(self.num_steps):
             self.obs[step] = next_obs
             self.dones[step] = next_done
@@ -223,6 +269,10 @@ class ArcAgiVectorizedTrainer:
 
             # Execute actions in vectorized environment
             next_obs, reward, terminations, truncations, infos = self.envs.step(action.cpu().numpy())
+            # for i in range(self.num_envs):
+                # if self.current_episode_returns[i] >= 500.0:
+                    # truncations[i] = True
+            # print(f'rollout step: {step}. reward: {reward}')
             next_done = np.logical_or(terminations, truncations)
             self.rewards[step] = torch.tensor(reward).to(self.device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(self.device), torch.Tensor(next_done).to(self.device)
@@ -231,18 +281,33 @@ class ArcAgiVectorizedTrainer:
             self.current_episode_returns += reward
             self.current_episode_lengths += 1
             
+            if 'episode' in infos.keys():
+                print(f'f"iteration={iteration}, episodic_return={infos['episode']['r']}')
+            # if "final_info" in infos:
+            #     for info in infos["final_info"]:
+            #         if info and "episode" in info:
+            #             print(f"iteration: {iteration}: episodic_return={info['episode']['r']}")
+
             # Log episode statistics when episodes end
+            # print(f'rollout step: {step} before reset. current_episode_returns: {self.current_episode_returns}',)
+            # print(f'terminations: {terminations}. truncations: {truncations}',)
+            
+            
             for i in range(self.num_envs):
-                if terminations[i] or truncations[i]:
+                if next_done[i]:
+                    # print(f"env {i} is done")
                     # Episode ended - log stats
-                    self.episode_rewards.append(self.current_episode_returns[i])
+                    self.episode_returns.append(self.current_episode_returns[i])
                     self.episode_lengths.append(self.current_episode_lengths[i])
-                    self.success_rate.append(1.0 if self.current_episode_returns[i] > 10.0 else 0.0)
+                    # self.success_rate.append(1.0 if self.current_episode_returns[i] > 400.0 else 0.0)
                     
                     # Reset tracking for this environment
                     self.current_episode_returns[i] = 0.0
                     self.current_episode_lengths[i] = 0
-        
+            # print(f'rollout step: {step} after reset. current_episode_returns: {self.current_episode_returns}')
+            # print(f'terminations: {terminations}. truncations: {truncations}',)
+            
+            # print(f'rollout step: {step}. current_episode_returns: {self.current_episode_returns}')
         # Bootstrap value for the next state
         with torch.no_grad():
             next_value = self.agent.get_value(next_obs).reshape(1, -1)
@@ -364,6 +429,9 @@ class ArcAgiVectorizedTrainer:
         start_time = time.time()
         best_mean_reward = -float('inf')
         first_vis = True
+        next_obs, _ = self.envs.reset(seed=self.seed)
+        next_obs = torch.Tensor(next_obs).to(self.device)
+        next_done = torch.zeros(self.num_envs).to(self.device)
         
         for iteration in range(1, num_iterations + 1):
             # Annealing learning rate
@@ -373,7 +441,7 @@ class ArcAgiVectorizedTrainer:
                 self.optimizer.param_groups[0]["lr"] = lrnow
             
             # Collect rollouts
-            next_value = self.collect_rollouts(iteration)
+            next_value = self.collect_rollouts(next_obs, next_done, iteration)
             
             # Compute GAE
             advantages, returns = self.compute_gae(next_value)
@@ -386,15 +454,15 @@ class ArcAgiVectorizedTrainer:
             
             # Logging
             if iteration % self.config.logging.log_interval == 0:
-                mean_reward = np.mean(self.episode_rewards) if self.episode_rewards else 0
+                mean_reward = np.mean(self.episode_returns) if self.episode_returns else 0
                 mean_length = np.mean(self.episode_lengths) if self.episode_lengths else 0
                 success_rate = np.mean(self.success_rate) if self.success_rate else 0
                 sps = int(global_step / (time.time() - start_time))
                 
                 print(f"\nIteration {iteration}/{num_iterations}")
                 print(f"Global step: {global_step}")
-                print(f"Last reward: {self.episode_rewards[-1]:.3f}")
-                print(f"Mean reward (last 100 episodes): {mean_reward:.3f}")
+                # print(f"Last return: {self.episode_returns[-1]:.3f}")
+                print(f"Mean return (last {self.num_envs} episodes): {mean_reward:.3f}")
                 print(f"Mean episode length: {mean_length:.1f}")
                 print(f"Success rate: {success_rate:.3f}")
                 print(f"SPS: {sps}")
@@ -410,7 +478,7 @@ class ArcAgiVectorizedTrainer:
                 if self.config.logging.use_wandb:
                     log_dict = {
                         'charts/learning_rate': self.optimizer.param_groups[0]['lr'],
-                        'charts/last_episodic_return': self.episode_rewards[-1],
+                        'charts/last_episodic_return': self.episode_returns[-1],
                         'charts/mean_episodic_return': mean_reward,
                         'charts/episodic_length': mean_length,
                         'charts/SPS': sps,
