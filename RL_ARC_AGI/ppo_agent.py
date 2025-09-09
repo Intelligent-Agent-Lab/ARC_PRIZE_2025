@@ -157,21 +157,59 @@ class PPOAgent:
             try:
                 # Get current observation and info for this batch
                 current_obs = obs[i]  # Shape: (30, 180)
-                if isinstance(obs_info, list) and len(obs_info) > i:
-                    current_info = obs_info[i]
-                elif not isinstance(obs_info, list):
-                    current_info = obs_info
-                else:
-                    current_info = None
+                current_info = None
+                
+                # Handle vectorized environment info structure
+                if obs_info is not None:
+                    if isinstance(obs_info, dict):
+                        # Vectorized environment returns flattened dict
+                        # Extract info for environment i
+                        current_info = {}
+                        if 'size_candidate' in obs_info:
+                            if len(obs_info['size_candidate']) > i:
+                                val = obs_info['size_candidate'][i]
+                                # Handle numpy array of lists from vectorized env
+                                if hasattr(val, 'tolist'):
+                                    current_info['size_candidate'] = val.tolist()
+                                elif isinstance(val, (list, tuple)):
+                                    current_info['size_candidate'] = list(val)
+                                else:
+                                    current_info['size_candidate'] = val
+                        if 'color_candidate' in obs_info:
+                            if len(obs_info['color_candidate']) > i:
+                                val = obs_info['color_candidate'][i]
+                                # Handle numpy array of lists from vectorized env
+                                if hasattr(val, 'tolist'):
+                                    current_info['color_candidate'] = val.tolist()
+                                elif isinstance(val, (list, tuple)):
+                                    current_info['color_candidate'] = list(val)
+                                else:
+                                    current_info['color_candidate'] = val
+                    elif isinstance(obs_info, list) and len(obs_info) > i:
+                        current_info = obs_info[i]
                 
                 # Get solution area (150:180)
                 solution_area = current_obs[:, 150:]  # Shape: (30, 30)
                 
-                # Find valid positions (where value is 11, empty area)
-                valid_positions = (solution_area == 11)  # Shape: (30, 30)
+                # Get target size (default to [4, 4])
+                size_candidate = current_info.get('size_candidate', [4, 4]) if current_info else [4, 4]
+                target_rows, target_cols = size_candidate[0], size_candidate[1]
+                
+                # Only consider positions within the target size area
+                valid_positions = torch.zeros_like(solution_area, dtype=torch.bool)
+                if target_rows > 0 and target_cols > 0:
+                    # Only the top-left target_rows x target_cols area is valid
+                    target_area = solution_area[:target_rows, :target_cols]
+                    valid_positions[:target_rows, :target_cols] = (target_area == 11)
                 
                 # Get valid colors from color_candidate
                 valid_colors = current_info.get('color_candidate', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]) if current_info else [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+                
+                
+                # Count statistics for logging
+                total_valid_positions = torch.sum(valid_positions).item()
+                total_actions = 9000
+                masked_actions = 0
                 
                 # Create mask: action_idx = color * 900 + row * 30 + col
                 for row in range(30):
@@ -182,6 +220,7 @@ class PPOAgent:
                             for color in range(10):
                                 action_idx = color * 900 + start_idx
                                 action_mask[i, action_idx] = -1e9
+                                masked_actions += 1
                         else:
                             # If position is valid, only allow valid colors
                             start_idx = row * 30 + col
@@ -189,6 +228,15 @@ class PPOAgent:
                                 if color not in valid_colors:
                                     action_idx = color * 900 + start_idx
                                     action_mask[i, action_idx] = -1e9
+                                    masked_actions += 1
+                
+                # Log masking statistics occasionally
+                if hasattr(self, 'mask_log_counter'):
+                    self.mask_log_counter += 1
+                else:
+                    self.mask_log_counter = 1
+                    
+                # Removed excessive logging
             except Exception as e:
                 print(f"Warning: Could not create action mask for batch {i}: {e}")
                 # Continue without masking for this batch

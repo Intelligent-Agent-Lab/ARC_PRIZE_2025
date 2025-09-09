@@ -27,6 +27,48 @@ from ppo_agent import PPOAgent
 from matplotlib import colors
 from pathlib import Path
 
+
+def log_action_details(action_tensor, infos, step_num, max_logs=5):
+    """Log detailed information about selected actions."""
+    if step_num % 50 == 0:  # Log every 50 steps to avoid spam
+        num_envs = min(len(action_tensor), max_logs)
+        print(f"\n=== Step {step_num} Action Details ===")
+        
+        for env_idx in range(num_envs):
+            action_int = action_tensor[env_idx].item()
+            action_dict = action_converter(action_int)
+            
+            color = action_dict['color']
+            coordinate = action_dict['coordinate']
+            row, col = coordinate
+            
+            # Get info for this environment - infos might be dict or list
+            info = {}
+            if infos:
+                if isinstance(infos, dict):
+                    # If infos is a dict, try to get info for this env_idx
+                    info = infos.get(env_idx, {})
+                elif isinstance(infos, list) and len(infos) > env_idx:
+                    # If infos is a list, get the element at env_idx
+                    info = infos[env_idx] if infos[env_idx] else {}
+                    
+            color_candidate = info.get('color_candidate', 'Unknown')
+            size_candidate = info.get('size_candidate', 'Unknown')
+            
+            print(f"  Env {env_idx}: Action {action_int} -> Color {color} at ({row}, {col})")
+            print(f"    Valid colors: {color_candidate}")
+            print(f"    Target size: {size_candidate}")
+            
+            # Check if color is valid
+            if isinstance(color_candidate, list) and color in color_candidate:
+                valid_color = "✓"
+            elif isinstance(color_candidate, list):
+                valid_color = "✗"
+            else:
+                valid_color = "?"
+            print(f"    Color validity: {valid_color}")
+
+
 class ArcAgiTrainer:
     """Trainer class for PPO on ArcAgiGrid environment."""
     
@@ -251,6 +293,14 @@ class ArcAgiTrainer:
             current_info = info  # Update current info for next action
             timestep = info['timestep']
             done = terminated or truncated
+            
+            # Log action details periodically
+            if hasattr(self, 'action_step_counter'):
+                self.action_step_counter += 1
+            else:
+                self.action_step_counter = 1
+            log_action_details(action.unsqueeze(0), [info], self.action_step_counter)
+            
             print(f"update: {update}, timestep: {timestep}, action: {action}, terminated: {terminated}, truncated: {truncated}")
             # Store transition
             self.agent.store_transition(obs, action, log_prob, reward, value, done)

@@ -378,6 +378,17 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         
         self._current_grid_img[row, 150+col] = color
         self._chosen_grid_img[row, col] += 1
+        
+        # Log grid changes occasionally
+        if hasattr(self, 'step_counter'):
+            self.step_counter += 1
+        else:
+            self.step_counter = 1
+            
+        if self.step_counter % 1000 == 0:  # Log every 1000 steps
+            solution_area = self._current_grid_img[:, 150:]
+            filled_cells = int(np.sum(solution_area != 11))
+            print(f"Step {self.step_counter}: Progress {filled_cells}/16 cells filled")
 
         # Check if agent reached the target
         target_color_img = self._target_grid_img[row, 150+col]
