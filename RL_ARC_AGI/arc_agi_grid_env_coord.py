@@ -364,8 +364,8 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         terminated = False
         truncated = False
         
-        # coord에 색칠한 color가 실제 color와 다르다면 종료
-        if color != target_color_img:
+        # coord에 색칠한 color가 실제 color와 다르거나 현재 값이 11이 아닌 경우 종료
+        if color != target_color_img or current_cell_value != 11:
             terminated = True
             reward = -1
         else:
@@ -376,9 +376,6 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
                 reward = 0.01  # 정답이지만 10인 경우 기존 보상
             terminated = False
         
-        # 현재 칸의 값이 11이 아닌 경우 추가 페널티
-        if current_cell_value != 11:
-            reward -= 0.1
         check_ary = np.unique((self._current_grid_img == self._target_grid_img))
         if True in check_ary and len(check_ary) == 1:
             terminated = True 
