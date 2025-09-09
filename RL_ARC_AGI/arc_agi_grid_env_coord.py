@@ -281,8 +281,6 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
     def reset(self,
               seed: Optional[int] = None,
               options: Optional[dict] = None):
-        task_id = None
-        pair_idx = None
         if options != None:
             mode = options['mode']
             self.task_id = options['task_id']
@@ -290,7 +288,7 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
             reset_sol_grid = options['reset_sol_grid']
     
         self.timestep = 0
-        if task_id == None:
+        if self.task_id == None:
             self.task_id = self._select_task(seed)
             
         self.episode_returns = 0
