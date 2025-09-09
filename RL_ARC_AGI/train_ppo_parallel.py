@@ -170,14 +170,14 @@ class ArcAgiVectorizedTrainer:
             lr=self.config.training.learning_rate, 
             eps=1e-5
         )
-        
+        self.mini_batch_size = int(self.config.environment.num_steps * self.config.environment.num_envs / self.config.training.num_minibatches)
         print(f"PPO Agent created with device: {self.device}")
         
     def setup_logging(self):
         """Setup logging and metrics tracking."""
-        self.episode_rewards = deque(maxlen=100)
-        self.episode_lengths = deque(maxlen=100)
-        self.success_rate = deque(maxlen=100)
+        self.episode_returns = deque(maxlen=self.config.environment.num_envs)
+        self.episode_lengths = deque(maxlen=self.config.environment.num_envs)
+        self.success_rate = deque(maxlen=self.config.environment.num_envs)
         
         # Create save directory
         os.makedirs(self.config.logging.save_dir, exist_ok=True)
@@ -266,16 +266,9 @@ class ArcAgiVectorizedTrainer:
         except Exception as e:
             print(f"Warning: Could not visualize grid at iteration {iteration}: {e}")
         
-    def collect_rollouts(self, iteration: int):
+    def collect_rollouts(self, next_obs, next_done, iteration: int):
         """Collect rollout data for training using vectorized environments."""
         # Reset environments
-        next_obs, _ = self.envs.reset(seed=self.seed)
-        next_obs = torch.Tensor(next_obs).to(self.device)
-        next_done = torch.zeros(self.num_envs).to(self.device)
-        
-        # Reset episode tracking
-        self.current_episode_returns = np.zeros(self.num_envs)
-        self.current_episode_lengths = np.zeros(self.num_envs)
         
         for step in range(self.num_steps):
             self.obs[step] = next_obs
@@ -303,7 +296,7 @@ class ArcAgiVectorizedTrainer:
             for i in range(self.num_envs):
                 if terminations[i] or truncations[i]:
                     # Episode ended - log stats
-                    self.episode_rewards.append(self.current_episode_returns[i])
+                    self.episode_returns.append(self.current_episode_returns[i])
                     self.episode_lengths.append(self.current_episode_lengths[i])
                     self.success_rate.append(1.0 if self.current_episode_returns[i] > 10.0 else 0.0)
                     
@@ -352,8 +345,8 @@ class ArcAgiVectorizedTrainer:
         
         for epoch in range(self.config.training.ppo_epochs):
             np.random.shuffle(b_inds)
-            for start in range(0, batch_size, self.config.training.mini_batch_size):
-                end = start + self.config.training.mini_batch_size
+            for start in range(0, batch_size, self.mini_batch_size):
+                end = start + self.mini_batch_size
                 mb_inds = b_inds[start:end]
 
                 _, newlogprob, entropy, newvalue = self.agent.get_action_and_value(b_obs[mb_inds], b_actions.long()[mb_inds])
@@ -433,6 +426,10 @@ class ArcAgiVectorizedTrainer:
         best_mean_reward = -float('inf')
         first_vis = True
         
+        next_obs, _ = self.envs.reset(seed=self.seed)
+        next_obs = torch.Tensor(next_obs).to(self.device)
+        next_done = torch.zeros(self.num_envs).to(self.device)
+        
         for iteration in range(1, num_iterations + 1):
             # Annealing learning rate
             if self.config.training.anneal_lr:
@@ -441,7 +438,7 @@ class ArcAgiVectorizedTrainer:
                 self.optimizer.param_groups[0]["lr"] = lrnow
             
             # Collect rollouts
-            next_value = self.collect_rollouts(iteration)
+            next_value = self.collect_rollouts(next_obs, next_done, iteration)
             
             # Compute GAE
             advantages, returns = self.compute_gae(next_value)
@@ -454,17 +451,18 @@ class ArcAgiVectorizedTrainer:
             
             # Logging
             if iteration % self.config.logging.log_interval == 0:
-                mean_reward = np.mean(self.episode_rewards) if self.episode_rewards else 0
+                mean_reward = np.mean(self.episode_returns) if self.episode_returns else 0
                 mean_length = np.mean(self.episode_lengths) if self.episode_lengths else 0
                 success_rate = np.mean(self.success_rate) if self.success_rate else 0
                 sps = int(global_step / (time.time() - start_time))
                 
                 print(f"\nIteration {iteration}/{num_iterations}")
                 print(f"Global step: {global_step}")
-                print(f"Mean reward (last 100 episodes): {mean_reward:.3f}")
+                print(f"Last return: {self.episode_return[-1]:.3f}")
+                print(f"Mean reward (last {self.config.environment.num_envs} episodes): {mean_reward:.3f}")
                 print(f"Mean episode length: {mean_length:.1f}")
                 print(f"Success rate: {success_rate:.3f}")
-                print(f"SPS: {sps}")
+                print(f"SPS (global step을 롤아웃하고 업데이트까지 걸린 시간): {sps}")
                 print(f"Learning rate: {self.optimizer.param_groups[0]['lr']:.6f}")
                 
                 if training_metrics:
