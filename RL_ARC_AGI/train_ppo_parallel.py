@@ -81,12 +81,65 @@ class Agent(nn.Module):
         _, state_value = self.forward(x)
         return state_value
 
-    def get_action_and_value(self, x, action=None):
+    def get_action_and_value(self, x, action=None, obs_info=None):
         action_logits, state_value = self.forward(x)
+        
+        # Apply action masking if obs_info is provided
+        if obs_info is not None:
+            action_mask = self._create_action_mask(x, obs_info)
+            # Set invalid actions to very large negative value
+            action_logits = action_logits + action_mask
+        
         probs = Categorical(logits=action_logits)
         if action is None:
             action = probs.sample()
         return action, probs.log_prob(action), probs.entropy(), state_value
+    
+    def _create_action_mask(self, obs, obs_info):
+        """Create action mask based on observation and info."""
+        batch_size = obs.shape[0]
+        action_mask = torch.full((batch_size, 9000), 0.0, device=obs.device)
+        
+        if obs_info is None:
+            return action_mask
+        
+        for i in range(batch_size):
+            try:
+                # Get current observation and info for this batch
+                current_obs = obs[i]  # Shape: (30, 180)
+                current_info = obs_info[i] if isinstance(obs_info, list) else obs_info
+                
+                # Get solution area (150:180)
+                solution_area = current_obs[:, 150:]  # Shape: (30, 30)
+                
+                # Find valid positions (where value is 11, empty area)
+                valid_positions = (solution_area == 11)  # Shape: (30, 30)
+                
+                # Get valid colors from color_candidate
+                valid_colors = current_info.get('color_candidate', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]) if current_info else [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+                
+                # Create mask: action_idx = color * 900 + row * 30 + col
+                for row in range(30):
+                    for col in range(30):
+                        if not valid_positions[row, col]:
+                            # If position is not valid (not 11), mask all colors for this position
+                            start_idx = row * 30 + col
+                            for color in range(10):
+                                action_idx = color * 900 + start_idx
+                                action_mask[i, action_idx] = -1e9
+                        else:
+                            # If position is valid, only allow valid colors
+                            start_idx = row * 30 + col
+                            for color in range(10):
+                                if color not in valid_colors:
+                                    action_idx = color * 900 + start_idx
+                                    action_mask[i, action_idx] = -1e9
+            except Exception as e:
+                print(f"Warning: Could not create action mask for batch {i}: {e}")
+                # Continue without masking for this batch
+                continue
+        
+        return action_mask
 
 
 class ArcAgiVectorizedTrainer:
@@ -128,6 +181,10 @@ class ArcAgiVectorizedTrainer:
         self.num_envs = self.config.environment.num_envs
         self.num_steps = self.config.environment.num_steps
         
+        # Get size_candidate and color_candidate from config if available
+        self.size_candidate = getattr(self.config.environment, 'size_candidate', [4, 4])
+        self.color_candidate = getattr(self.config.environment, 'color_candidate', [0, 1, 4, 5, 9])
+        
         # Create vectorized environment
         self.envs = gym.vector.SyncVectorEnv([
             make_env(
@@ -154,7 +211,7 @@ class ArcAgiVectorizedTrainer:
         """Setup the PPO agent."""
         # Calculate action space size
         obs_size = np.prod(self.envs.single_observation_space.shape)
-        action_size = 9900 # 10 colors * 30x30 coordinate space = 9000
+        action_size = 9000 # 10 colors * 30x30 coordinate space
         
         print(f"setup_agent. obs_size: {obs_size}, action_size: {action_size}")
         
@@ -276,7 +333,9 @@ class ArcAgiVectorizedTrainer:
 
             # ALGO LOGIC: action logic
             with torch.no_grad():
-                action, logprob, _, value = self.agent.get_action_and_value(next_obs)
+                # Use current infos for action masking (from previous step or reset)
+                current_infos = getattr(self, 'current_infos', None)
+                action, logprob, _, value = self.agent.get_action_and_value(next_obs, obs_info=current_infos)
                 self.values[step] = value.flatten()
             self.actions[step] = action
             self.logprobs[step] = logprob
@@ -284,6 +343,9 @@ class ArcAgiVectorizedTrainer:
             # Execute actions in vectorized environment
             dict_action = vectorized_action_converter(action.cpu())
             next_obs, reward, terminations, truncations, infos = self.envs.step(dict_action)
+            
+            # Store current infos for next step
+            self.current_infos = infos
             next_done = np.logical_or(terminations, truncations)
             self.rewards[step] = torch.tensor(reward).to(self.device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(self.device), torch.Tensor(next_done).to(self.device)
@@ -426,9 +488,16 @@ class ArcAgiVectorizedTrainer:
         best_mean_reward = -float('inf')
         first_vis = True
         
-        next_obs, _ = self.envs.reset(seed=self.seed)
+        reset_options = {
+            'size_candidate': self.size_candidate,
+            'color_candidate': self.color_candidate
+        }
+        next_obs, infos = self.envs.reset(seed=self.seed, options=reset_options)
         next_obs = torch.Tensor(next_obs).to(self.device)
         next_done = torch.zeros(self.num_envs).to(self.device)
+        
+        # Store initial infos for first action
+        self.current_infos = infos
         
         for iteration in range(1, num_iterations + 1):
             # Annealing learning rate

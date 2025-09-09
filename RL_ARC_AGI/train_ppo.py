@@ -63,6 +63,10 @@ class ArcAgiTrainer:
         self.task_id = self.config.environment.task_id
         self.pair_idx = self.config.environment.pair_idx
         
+        # Get size_candidate and color_candidate from config if available
+        self.size_candidate = getattr(self.config.environment, 'size_candidate', [4, 4])
+        self.color_candidate = getattr(self.config.environment, 'color_candidate', [0, 1, 4, 5, 9])
+        
         self.env = create_arc_env_coord(
                     fixed_task=self.fixed_task, 
                     fixed_pair_idx=self.fixed_pair_idx,
@@ -223,22 +227,28 @@ class ArcAgiTrainer:
         
         task_id = random.choice(self.task_id_list)
         
-        obs, info = self.env.reset(
-            seed=self.seed,
-            options={
-                'mode': 'train',
-                'task_id': task_id,
-                'reset_sol_grid': self.config.environment.reset_sol_grid
-            }
-        )
+        reset_options = {
+            'mode': 'train',
+            'task_id': task_id,
+            'reset_sol_grid': self.config.environment.reset_sol_grid,
+            'size_candidate': self.size_candidate,
+            'color_candidate': self.color_candidate
+        }
+        obs, info = self.env.reset(seed=self.seed, options=reset_options)
+        current_info = info
         
         for step in range(rollout_steps):
-            # Select action
-            action, log_prob, value = self.agent.select_action(obs)
+            # Select action with action masking
+            obs_tensor = torch.FloatTensor(obs).unsqueeze(0).to(self.agent.device)
+            with torch.no_grad():
+                # Make sure current_info is in list format for masking function
+                obs_info_list = [current_info] if current_info else [None]
+                action, log_prob, _, value = self.agent.get_action_and_value(obs_tensor, obs_info=obs_info_list)
             
             # Take environment step
             dict_action = action_converter(action.cpu().item())
             next_obs, reward, terminated, truncated, info = self.env.step(dict_action)
+            current_info = info  # Update current info for next action
             timestep = info['timestep']
             done = terminated or truncated
             print(f"update: {update}, timestep: {timestep}, action: {action}, terminated: {terminated}, truncated: {truncated}")

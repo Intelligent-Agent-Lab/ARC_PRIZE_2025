@@ -245,14 +245,18 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         self.eval_task_img_dict = eval_task_img_dict
         self.train_task_list = list(self.train_task_img_dict.keys())
         self.eval_task_list = list(self.eval_task_img_dict.keys())
+        
+        # Initialize candidates as empty lists
+        self.size_candidate = []
+        self.color_candidate = []
 
         # observation space에 대한 정의
         # Dict space gives us structured, human-readable observations
         self.observation_space = gym.spaces.Box(low=0, high=11, shape=(30,180), dtype=int)
 
-        # action space에 대한 정의 (0~9 색상, 10: 마스크)
+        # action space에 대한 정의 (0~9 색상만)
         self.action_space = gym.spaces.Dict({
-            'color': gym.spaces.Discrete(11),
+            'color': gym.spaces.Discrete(10),
             'coordinate': gym.spaces.MultiDiscrete([30, 30]),
             }
         )
@@ -276,13 +280,13 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
             "chosen_grid_img": self._chosen_grid_img,
             "episode_returns": self.episode_returns,
             "episode_lengths": self.episode_lengths,
+            "size_candidate": self.size_candidate,
+            "color_candidate": self.color_candidate,
         }
 
     def reset(self,
               seed: Optional[int] = None,
               options: Optional[dict] = None):
-        task_id = None
-        pair_idx = None
         if options != None:
             mode = options['mode']
             self.task_id = options['task_id']
@@ -290,7 +294,7 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
             reset_sol_grid = options['reset_sol_grid']
     
         self.timestep = 0
-        if task_id == None:
+        if self.task_id == None:
             self.task_id = self._select_task(seed)
             
         self.episode_returns = 0
@@ -321,11 +325,27 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
             elif mode == 'evaluation' or mode == 'eval':
                 self._target_grid_img = self.eval_task_img_dict[self.task_id][self.pair_idx]
         self.test_input_idx = self.pair_idx
+        
+        # Set size_candidate and color_candidate from options or use defaults FIRST
+        if options and 'size_candidate' in options:
+            self.size_candidate = options['size_candidate']
+        else:
+            self.size_candidate = [4, 4]  # Default for task 3cd86f4f
+            
+        if options and 'color_candidate' in options:
+            self.color_candidate = options['color_candidate']
+        else:
+            self.color_candidate = [0, 1, 4, 5, 9]  # Default for task 3cd86f4f
+        
         # target grid에서 test solution에 해당하는 부분을 전부 pad_val으로 masking하고 current grid로 할당
         if reset_sol_grid == 'padding':
             empty_val = 11
             self._current_grid_img = self._target_grid_img.copy()
-            self._current_grid_img[0:30, 150:] = empty_val 
+            # Fill the solution area with different values based on size_candidate
+            self._current_grid_img[0:30, 150:] = 10  # Fill entire solution area with 10 first
+            # Then fill only the size_candidate area with empty_val (11)
+            height, width = self.size_candidate[0], self.size_candidate[1]
+            self._current_grid_img[0:height, 150:150+width] = empty_val 
         elif reset_sol_grid == 'random':
             # ! 여기서 solution에 해당하는 부분을 랜덤으로 초기화해도 좋을듯?
             rand_grid = np.random.randint(low=0,
@@ -335,6 +355,7 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
             self._current_grid_img[0:30, 150:] = rand_grid
 
         self._chosen_grid_img = np.zeros([30, 30]).astype(int)
+        
         observation = self._get_obs()
         info = self._get_info()
         return observation, info
@@ -364,8 +385,8 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         terminated = False
         truncated = False
         
-        # coord에 색칠한 color가 실제 color와 다르다면 종료
-        if color != target_color_img:
+        # coord에 색칠한 color가 실제 color와 다르거나 현재 값이 11이 아닌 경우 종료
+        if color != target_color_img or current_cell_value != 11:
             terminated = True
             reward = -1
         else:
@@ -376,9 +397,6 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
                 reward = 0.01  # 정답이지만 10인 경우 기존 보상
             terminated = False
         
-        # 현재 칸의 값이 11이 아닌 경우 추가 페널티
-        if current_cell_value != 11:
-            reward -= 0.1
         check_ary = np.unique((self._current_grid_img == self._target_grid_img))
         if True in check_ary and len(check_ary) == 1:
             terminated = True 
