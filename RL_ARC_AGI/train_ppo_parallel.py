@@ -175,9 +175,9 @@ class ArcAgiVectorizedTrainer:
         
     def setup_logging(self):
         """Setup logging and metrics tracking."""
-        self.episode_rewards = deque(maxlen=100)
-        self.episode_lengths = deque(maxlen=100)
-        self.success_rate = deque(maxlen=100)
+        self.episode_returns = deque(maxlen=self.config.environment.num_envs)
+        self.episode_lengths = deque(maxlen=self.config.environment.num_envs)
+        self.success_rate = deque(maxlen=self.config.environment.num_envs)
         
         # Create save directory
         os.makedirs(self.config.logging.save_dir, exist_ok=True)
@@ -296,7 +296,7 @@ class ArcAgiVectorizedTrainer:
             for i in range(self.num_envs):
                 if terminations[i] or truncations[i]:
                     # Episode ended - log stats
-                    self.episode_rewards.append(self.current_episode_returns[i])
+                    self.episode_returns.append(self.current_episode_returns[i])
                     self.episode_lengths.append(self.current_episode_lengths[i])
                     self.success_rate.append(1.0 if self.current_episode_returns[i] > 10.0 else 0.0)
                     
@@ -451,17 +451,18 @@ class ArcAgiVectorizedTrainer:
             
             # Logging
             if iteration % self.config.logging.log_interval == 0:
-                mean_reward = np.mean(self.episode_rewards) if self.episode_rewards else 0
+                mean_reward = np.mean(self.episode_returns) if self.episode_returns else 0
                 mean_length = np.mean(self.episode_lengths) if self.episode_lengths else 0
                 success_rate = np.mean(self.success_rate) if self.success_rate else 0
                 sps = int(global_step / (time.time() - start_time))
                 
                 print(f"\nIteration {iteration}/{num_iterations}")
                 print(f"Global step: {global_step}")
-                print(f"Mean reward (last 100 episodes): {mean_reward:.3f}")
+                print(f"Last return: {self.episode_return[-1]:.3f}")
+                print(f"Mean reward (last {self.config.environment.num_envs} episodes): {mean_reward:.3f}")
                 print(f"Mean episode length: {mean_length:.1f}")
                 print(f"Success rate: {success_rate:.3f}")
-                print(f"SPS: {sps}")
+                print(f"SPS (global step을 롤아웃하고 업데이트까지 걸린 시간): {sps}")
                 print(f"Learning rate: {self.optimizer.param_groups[0]['lr']:.6f}")
                 
                 if training_metrics:
