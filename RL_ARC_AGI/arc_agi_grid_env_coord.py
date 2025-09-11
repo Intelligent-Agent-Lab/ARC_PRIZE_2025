@@ -394,24 +394,21 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         
         self.timestep += 1
         
-        # coord에 색칠한 color가 실제 color와 다르거나 현재 값이 11이 아닌 경우 종료
+        terminated = False
+        truncated = False
+
+        # 잘못된 위치에 칠하거나, 이미 칠해진 곳에 다시 칠한 경우 (실패)
         if color != target_color_img or current_cell_value != 11:
             terminated = True
             reward = -1
-            truncated = False
         else:
-            # 퍼즐을 완성하면 보상 +1
+            # 퍼즐을 완성한 경우
             if np.array_equal(self._current_grid_img, self._target_grid_img):
-                terminated = False
+                terminated = True
                 reward = 1
-                truncated = True
+            # 올바른 중간 과정인 경우 (완성은 아직 아님)
             else:
-                # 정답이면서 10이 아닌 경우 0.05 보상
-                # 정답이지만 10인 경우 기존 보상 유지
-                # truncated는 오직 np.array_equal을 만족할때만 true로 수정
-                terminated = False
                 reward = 0.05 if color != 10 else 0.01
-                truncated = False
 
         observation = self._get_obs()
         info = self._get_info()
