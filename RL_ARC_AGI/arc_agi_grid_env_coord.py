@@ -402,9 +402,9 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         else:
             # 퍼즐을 완성하면 보상 +1
             if np.array_equal(self._current_grid_img, self._target_grid_img):
-                terminated = True
+                terminated = False
                 reward = 1
-                truncated = False
+                truncated = True
             else:
                 # 정답이면서 10이 아닌 경우 0.05 보상
                 # 정답이지만 10인 경우 기존 보상 유지
