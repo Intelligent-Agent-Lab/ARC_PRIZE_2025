@@ -390,32 +390,31 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
             filled_cells = int(np.sum(solution_area != 11))
             print(f"Step {self.step_counter}: Progress {filled_cells}/16 cells filled")
 
-        # Check if agent reached the target
         target_color_img = self._target_grid_img[row, 150+col]
         
-        terminated = False
-        truncated = False
+        self.timestep += 1
         
         # coord에 색칠한 color가 실제 color와 다르거나 현재 값이 11이 아닌 경우 종료
         if color != target_color_img or current_cell_value != 11:
             terminated = True
             reward = -1
+            truncated = False
         else:
-            # color == target_color_img인 경우
-            if color != 10:
-                reward = 0.05  # 정답이면서 10이 아닌 경우 0.05 보상
+            # 퍼즐을 완성하면 보상 +1
+            if np.array_equal(self._current_grid_img, self._target_grid_img):
+                terminated = True
+                reward = 1
+                truncated = False
             else:
-                reward = 0.01  # 정답이지만 10인 경우 기존 보상
-            terminated = False
-        
-        check_ary = np.unique((self._current_grid_img == self._target_grid_img))
-        if True in check_ary and len(check_ary) == 1:
-            terminated = True 
-            reward = 1 + 0.01
-        truncated = (self.timestep == 899)
+                # 정답이면서 10이 아닌 경우 0.05 보상
+                # 정답이지만 10인 경우 기존 보상 유지
+                # truncated는 오직 np.array_equal을 만족할때만 true로 수정
+                terminated = False
+                reward = 0.05 if color != 10 else 0.01
+                truncated = False
+
         observation = self._get_obs()
         info = self._get_info()
-        self.timestep += 1
         self.episode_returns += reward
         self.episode_lengths += 1
         
