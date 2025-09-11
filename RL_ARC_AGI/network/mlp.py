@@ -3,7 +3,7 @@ import torch.nn as nn
 class ActorCritic_MLP(nn.Module):
     """Actor-Critic network for PPO with grid sequence observations."""
     
-    def __init__(self, input_size: int = 5400, hidden_size: int = 64, action_size: int = 9000):
+    def __init__(self, input_size: int = 5400, hidden_size: int = 64, action_size: int = 9900):
         super(ActorCritic_MLP, self).__init__()
         self.embedding = nn.Embedding(12, hidden_size)
         # ! [Batch, 5400, Hidden]
