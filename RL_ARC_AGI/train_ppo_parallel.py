@@ -32,6 +32,56 @@ from matplotlib import colors
 from pathlib import Path
 
 
+def log_action_details(action_tensor, infos, step_num, max_logs=5):
+    """Log detailed information about selected actions."""
+    if step_num % 50 == 0:  # Log every 50 steps to avoid spam
+        num_envs = min(len(action_tensor), max_logs)
+        print(f"\n=== Step {step_num} Action Details ===")
+        
+        for env_idx in range(num_envs):
+            action_int = action_tensor[env_idx].item()
+            action_dict = action_converter(action_int)
+            
+            color = action_dict['color']
+            coordinate = action_dict['coordinate']
+            row, col = coordinate
+            
+            # Get info for this environment - handle vectorized environment structure
+            color_candidate = 'Unknown'
+            size_candidate = 'Unknown'
+            
+            if infos:
+                if isinstance(infos, dict):
+                    # Vectorized environment returns flattened arrays
+                    if 'size_candidate' in infos:
+                        if len(infos['size_candidate']) > env_idx:
+                            val = infos['size_candidate'][env_idx]
+                            size_candidate = val.tolist() if hasattr(val, 'tolist') else val
+                    if 'color_candidate' in infos:
+                        if len(infos['color_candidate']) > env_idx:
+                            val = infos['color_candidate'][env_idx]
+                            color_candidate = val.tolist() if hasattr(val, 'tolist') else val
+                elif isinstance(infos, list) and len(infos) > env_idx:
+                    # If infos is a list, get the element at env_idx
+                    info = infos[env_idx] if infos[env_idx] else {}
+                    if isinstance(info, dict):
+                        color_candidate = info.get('color_candidate', 'Unknown')
+                        size_candidate = info.get('size_candidate', 'Unknown')
+            
+            print(f"  Env {env_idx}: Action {action_int} -> Color {color} at ({row}, {col})")
+            print(f"    Valid colors: {color_candidate}")
+            print(f"    Target size: {size_candidate}")
+            
+            # Check if color is valid
+            if isinstance(color_candidate, list) and color in color_candidate:
+                valid_color = "✓"
+            elif isinstance(color_candidate, list):
+                valid_color = "✗"
+            else:
+                valid_color = "?"
+            print(f"    Color validity: {valid_color}")
+
+
 def make_env(fixed_task: bool, 
              fixed_pair_idx: bool, 
              task_id: str, 
@@ -81,12 +131,127 @@ class Agent(nn.Module):
         _, state_value = self.forward(x)
         return state_value
 
-    def get_action_and_value(self, x, action=None):
+    def get_action_and_value(self, x, action=None, obs_info=None):
         action_logits, state_value = self.forward(x)
+        
+        # Apply action masking if obs_info is provided
+        if obs_info is not None:
+            action_mask = self._create_action_mask(x, obs_info)
+            # Set invalid actions to very large negative value
+            action_logits = action_logits + action_mask
+        # Note: During policy updates, obs_info is None (this is normal PPO behavior)
+        
         probs = Categorical(logits=action_logits)
         if action is None:
             action = probs.sample()
         return action, probs.log_prob(action), probs.entropy(), state_value
+    
+    def _create_action_mask(self, obs, obs_info):
+        """Create action mask based on observation and info."""
+        batch_size = obs.shape[0] if obs.dim() > 1 else 1
+        if batch_size == 1:
+            obs = obs.unsqueeze(0)
+        
+        action_mask = torch.full((batch_size, 9000), 0.0, device=obs.device)
+        
+        if obs_info is None:
+            print("Warning: obs_info is None, no action masking applied")
+            return action_mask.squeeze(0) if batch_size == 1 else action_mask
+        
+        for i in range(batch_size):
+            try:
+                # Get current observation and info for this batch
+                current_obs = obs[i]  # Shape: (30, 180)
+                current_info = None
+                
+                # Handle vectorized environment info structure
+                if obs_info is not None:
+                    if isinstance(obs_info, dict):
+                        # Vectorized environment returns flattened dict
+                        # Extract info for environment i
+                        current_info = {}
+                        if 'size_candidate' in obs_info:
+                            if len(obs_info['size_candidate']) > i:
+                                val = obs_info['size_candidate'][i]
+                                # Handle numpy array of lists from vectorized env
+                                if hasattr(val, 'tolist'):
+                                    current_info['size_candidate'] = val.tolist()
+                                elif isinstance(val, (list, tuple)):
+                                    current_info['size_candidate'] = list(val)
+                                else:
+                                    current_info['size_candidate'] = val
+                        if 'color_candidate' in obs_info:
+                            if len(obs_info['color_candidate']) > i:
+                                val = obs_info['color_candidate'][i]
+                                # Handle numpy array of lists from vectorized env
+                                if hasattr(val, 'tolist'):
+                                    current_info['color_candidate'] = val.tolist()
+                                elif isinstance(val, (list, tuple)):
+                                    current_info['color_candidate'] = list(val)
+                                else:
+                                    current_info['color_candidate'] = val
+                    elif isinstance(obs_info, list) and len(obs_info) > i:
+                        current_info = obs_info[i]
+
+                # Get solution area (150:180)
+                solution_area = current_obs[:, 150:]  # Shape: (30, 30)
+                
+                # Get target size (default to [4, 4])
+                size_candidate = current_info.get('size_candidate', [4, 4]) if current_info else [4, 4]
+                target_rows, target_cols = size_candidate[0], size_candidate[1]
+                
+                # Only consider positions within the target size area
+                valid_positions = torch.zeros_like(solution_area, dtype=torch.bool)
+                if target_rows > 0 and target_cols > 0:
+                    # Only the top-left target_rows x target_cols area is valid
+                    target_area = solution_area[:target_rows, :target_cols]
+                    valid_positions[:target_rows, :target_cols] = (target_area == 11)
+
+                # Get valid colors from color_candidate
+                valid_colors = current_info.get('color_candidate', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]) if current_info else [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+                
+                
+                # Count statistics for logging
+                total_valid_positions = torch.sum(valid_positions).item()
+                total_actions = 9000
+                masked_actions = 0
+                
+                # Create mask: action_idx = color * 900 + row * 30 + col
+                for row in range(30):
+                    for col in range(30):
+                        if not valid_positions[row, col]:
+                            # If position is not valid (not 11), mask all colors for this position
+                            start_idx = row * 30 + col
+                            for color in range(10):
+                                action_idx = color * 900 + start_idx
+                                action_mask[i, action_idx] = -1e9
+                                masked_actions += 1
+                        else:
+                            # If position is valid, only allow valid colors
+                            start_idx = row * 30 + col
+                            for color in range(10):
+                                if color not in valid_colors:
+                                    action_idx = color * 900 + start_idx
+                                    action_mask[i, action_idx] = -1e9
+                                    masked_actions += 1
+                
+                # Log masking statistics occasionally
+                if hasattr(self, 'mask_log_counter'):
+                    self.mask_log_counter += 1
+                else:
+                    self.mask_log_counter = 1
+                    
+                # Action masking stats logging disabled for clean output
+                # if self.mask_log_counter % 100 == 0:  # Log every 100 calls
+                #     valid_actions = total_actions - masked_actions
+                #     mask_ratio = masked_actions / total_actions
+                #     print(f"Action Masking Stats: {valid_actions}/{total_actions} valid ({1-mask_ratio:.1%})")
+            except Exception as e:
+                print(f"Warning: Could not create action mask for batch {i}: {e}")
+                # Continue without masking for this batch
+                continue
+        
+        return action_mask.squeeze(0) if batch_size == 1 else action_mask
 
 
 class ArcAgiVectorizedTrainer:
@@ -128,6 +293,10 @@ class ArcAgiVectorizedTrainer:
         self.num_envs = self.config.environment.num_envs
         self.num_steps = self.config.environment.num_steps
         
+        # Get size_candidate and color_candidate from config if available
+        self.size_candidate = getattr(self.config.environment, 'size_candidate', [4, 4])
+        self.color_candidate = getattr(self.config.environment, 'color_candidate', [0, 1, 4, 5, 9])
+        
         # Create vectorized environment
         self.envs = gym.vector.SyncVectorEnv([
             make_env(
@@ -154,7 +323,7 @@ class ArcAgiVectorizedTrainer:
         """Setup the PPO agent."""
         # Calculate action space size
         obs_size = np.prod(self.envs.single_observation_space.shape)
-        action_size = 9900 # 10 colors * 30x30 coordinate space = 9000
+        action_size = 9000 # 10 colors * 30x30 coordinate space
         
         print(f"setup_agent. obs_size: {obs_size}, action_size: {action_size}")
         
@@ -276,7 +445,13 @@ class ArcAgiVectorizedTrainer:
 
             # ALGO LOGIC: action logic
             with torch.no_grad():
-                action, logprob, _, value = self.agent.get_action_and_value(next_obs)
+                # Use current infos for action masking (from previous step or reset)
+                current_infos = getattr(self, 'current_infos', None)
+                
+                # Check for critical errors only
+                if current_infos is None:
+                    print(f"WARNING: current_infos is None at step {step}!")
+                action, logprob, _, value = self.agent.get_action_and_value(next_obs, obs_info=current_infos)
                 self.values[step] = value.flatten()
             self.actions[step] = action
             self.logprobs[step] = logprob
@@ -284,6 +459,13 @@ class ArcAgiVectorizedTrainer:
             # Execute actions in vectorized environment
             dict_action = vectorized_action_converter(action.cpu())
             next_obs, reward, terminations, truncations, infos = self.envs.step(dict_action)
+            
+            
+            # Log action details disabled for clean output
+            # log_action_details(action, infos, step + iteration * self.num_steps)
+            
+            # Store current infos for next step
+            self.current_infos = infos
             next_done = np.logical_or(terminations, truncations)
             self.rewards[step] = torch.tensor(reward).to(self.device).view(-1)
             next_obs, next_done = torch.Tensor(next_obs).to(self.device), torch.Tensor(next_done).to(self.device)
@@ -426,9 +608,20 @@ class ArcAgiVectorizedTrainer:
         best_mean_reward = -float('inf')
         first_vis = True
         
-        next_obs, _ = self.envs.reset(seed=self.seed)
+        reset_options = {
+            'size_candidate': self.size_candidate,
+            'color_candidate': self.color_candidate
+        }
+        next_obs, infos = self.envs.reset(seed=self.seed, options=reset_options)
         next_obs = torch.Tensor(next_obs).to(self.device)
         next_done = torch.zeros(self.num_envs).to(self.device)
+        
+        # Store initial infos for first action
+        self.current_infos = infos
+        
+        # Verify info setup
+        if isinstance(infos, dict) and 'size_candidate' in infos and 'color_candidate' in infos:
+            print("Action masking initialized successfully")
         
         for iteration in range(1, num_iterations + 1):
             # Annealing learning rate

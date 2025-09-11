@@ -135,7 +135,7 @@ class ActorCritic_ViT(nn.Module):
     
     def __init__(self, grid_size=(30, 180), patch_size=15, embed_dim=768, 
                  num_heads=12, num_layers=12, mlp_ratio=4, vocab_size=12, 
-                 action_size=9900, dropout=0.1):
+                 action_size=9000, dropout=0.1):
         super().__init__()
         
         # Patch embedding

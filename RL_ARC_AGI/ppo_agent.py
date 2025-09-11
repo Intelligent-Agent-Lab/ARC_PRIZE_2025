@@ -47,7 +47,7 @@ class PPOAgent:
     def __init__(self, 
                  cfg,
                  input_size: int = 5400,
-                 action_size: int = 9900,
+                 action_size: int = 9000,
                  hidden_size: int = 512,
                  learning_rate: float = 3e-4,
                  gamma: float = 0.99,
@@ -125,15 +125,124 @@ class PPOAgent:
         """Get current learning rate."""
         return self.optimizer.param_groups[0]['lr']
         
-    def get_action_and_value(self, x, action=None):
+    def get_action_and_value(self, x, action=None, obs_info=None):
         """Get action, log probability, entropy, and value."""
         action_logits, value = self.ac_network(x)
+        
+        # Apply action masking if obs_info is provided
+        if obs_info is not None:
+            action_mask = self._create_action_mask(x, obs_info)
+            # Set invalid actions to very large negative value
+            action_logits = action_logits + action_mask
+        
         probs = Categorical(logits=action_logits)
         
         if action is None:
             action = probs.sample()
         
         return action, probs.log_prob(action), probs.entropy(), value
+    
+    def _create_action_mask(self, obs, obs_info):
+        """Create action mask based on observation and info."""
+        batch_size = obs.shape[0] if obs.dim() > 1 else 1
+        if batch_size == 1:
+            obs = obs.unsqueeze(0)
+        
+        action_mask = torch.full((batch_size, 9000), 0.0, device=self.device)
+        
+        if obs_info is None:
+            return action_mask.squeeze(0) if batch_size == 1 else action_mask
+        
+        for i in range(batch_size):
+            try:
+                # Get current observation and info for this batch
+                current_obs = obs[i]  # Shape: (30, 180)
+                current_info = None
+                
+                # Handle vectorized environment info structure
+                if obs_info is not None:
+                    if isinstance(obs_info, dict):
+                        # Vectorized environment returns flattened dict
+                        # Extract info for environment i
+                        current_info = {}
+                        if 'size_candidate' in obs_info:
+                            if len(obs_info['size_candidate']) > i:
+                                val = obs_info['size_candidate'][i]
+                                # Handle numpy array of lists from vectorized env
+                                if hasattr(val, 'tolist'):
+                                    current_info['size_candidate'] = val.tolist()
+                                elif isinstance(val, (list, tuple)):
+                                    current_info['size_candidate'] = list(val)
+                                else:
+                                    current_info['size_candidate'] = val
+                        if 'color_candidate' in obs_info:
+                            if len(obs_info['color_candidate']) > i:
+                                val = obs_info['color_candidate'][i]
+                                # Handle numpy array of lists from vectorized env
+                                if hasattr(val, 'tolist'):
+                                    current_info['color_candidate'] = val.tolist()
+                                elif isinstance(val, (list, tuple)):
+                                    current_info['color_candidate'] = list(val)
+                                else:
+                                    current_info['color_candidate'] = val
+                    elif isinstance(obs_info, list) and len(obs_info) > i:
+                        current_info = obs_info[i]
+                
+                # Get solution area (150:180)
+                solution_area = current_obs[:, 150:]  # Shape: (30, 30)
+                
+                # Get target size (default to [4, 4])
+                size_candidate = current_info.get('size_candidate', [4, 4]) if current_info else [4, 4]
+                target_rows, target_cols = size_candidate[0], size_candidate[1]
+                
+                # Only consider positions within the target size area
+                valid_positions = torch.zeros_like(solution_area, dtype=torch.bool)
+                if target_rows > 0 and target_cols > 0:
+                    # Only the top-left target_rows x target_cols area is valid
+                    target_area = solution_area[:target_rows, :target_cols]
+                    valid_positions[:target_rows, :target_cols] = (target_area == 11)
+                
+                # Get valid colors from color_candidate
+                valid_colors = current_info.get('color_candidate', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]) if current_info else [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+                
+                
+                # Count statistics for logging
+                total_valid_positions = torch.sum(valid_positions).item()
+                total_actions = 9000
+                masked_actions = 0
+                
+                # Create mask: action_idx = color * 900 + row * 30 + col
+                for row in range(30):
+                    for col in range(30):
+                        if not valid_positions[row, col]:
+                            # If position is not valid (not 11), mask all colors for this position
+                            start_idx = row * 30 + col
+                            for color in range(10):
+                                action_idx = color * 900 + start_idx
+                                action_mask[i, action_idx] = -1e9
+                                masked_actions += 1
+                        else:
+                            # If position is valid, only allow valid colors
+                            start_idx = row * 30 + col
+                            for color in range(10):
+                                if color not in valid_colors:
+                                    action_idx = color * 900 + start_idx
+                                    action_mask[i, action_idx] = -1e9
+                                    masked_actions += 1
+                
+                # Log masking statistics occasionally
+                if hasattr(self, 'mask_log_counter'):
+                    self.mask_log_counter += 1
+                else:
+                    self.mask_log_counter = 1
+                    
+                # Removed excessive logging
+            except Exception as e:
+                print(f"Warning: Could not create action mask for batch {i}: {e}")
+                # Continue without masking for this batch
+                continue
+        
+        return action_mask.squeeze(0) if batch_size == 1 else action_mask
         
     def reset_storage(self):
         """Reset storage for collecting rollout data."""
@@ -164,6 +273,14 @@ class PPOAgent:
     def store_transition(self, obs, action, log_prob, reward, value, done):
         """Store transition in rollout buffer."""
         self.observations.append(obs)
+        # Convert tensors to CPU/numpy for storage
+        if isinstance(action, torch.Tensor):
+            action = action.cpu()
+        if isinstance(log_prob, torch.Tensor):
+            log_prob = log_prob.cpu()
+        if isinstance(value, torch.Tensor):
+            value = value.cpu()
+        
         self.actions.append(action)
         self.log_probs.append(log_prob)
         self.rewards.append(reward)  # Store raw reward, normalize during GAE computation
@@ -174,7 +291,14 @@ class PPOAgent:
         """Compute Generalized Advantage Estimation (improved version)."""
         # Convert to numpy arrays for efficient computation
         rewards = np.array(self.rewards, dtype=np.float32)
-        values = np.array(self.values, dtype=np.float32)
+        # Values should already be converted to CPU in store_transition
+        values_list = []
+        for v in self.values:
+            if isinstance(v, torch.Tensor):
+                values_list.append(v.numpy())
+            else:
+                values_list.append(v)
+        values = np.array(values_list, dtype=np.float32)
         dones = np.array(self.dones, dtype=np.float32)
         
         # Normalize rewards if enabled
