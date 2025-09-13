@@ -404,7 +404,7 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         else:
             # 퍼즐을 완성한 경우
             if np.array_equal(self._current_grid_img, self._target_grid_img):
-                truncated = True
+                terminated = True
                 reward = 1
             # 올바른 중간 과정인 경우 (완성은 아직 아님)
             else:
