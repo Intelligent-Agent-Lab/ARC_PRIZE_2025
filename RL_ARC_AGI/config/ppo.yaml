@@ -10,6 +10,7 @@ environment:
   reward_shaping: false
   task_id_list: ['3cd86f4f', ] # 3cd86f4f, 794b24be
   seed: 42
+  rand_init: true
 
 # Training configuration
 training:

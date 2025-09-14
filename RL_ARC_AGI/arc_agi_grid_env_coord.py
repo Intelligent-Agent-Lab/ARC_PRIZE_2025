@@ -337,15 +337,45 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         else:
             self.color_candidate = [0, 1, 4, 5, 9]  # Default for task 3cd86f4f
         
+        # Get rand_init option
+        rand_init = options.get('rand_init', False) if options else False
+        
         # target grid에서 test solution에 해당하는 부분을 전부 pad_val으로 masking하고 current grid로 할당
         if reset_sol_grid == 'padding':
             empty_val = 11
             self._current_grid_img = self._target_grid_img.copy()
             # Fill the solution area with different values based on size_candidate
             self._current_grid_img[0:30, 150:] = 10  # Fill entire solution area with 10 first
-            # Then fill only the size_candidate area with empty_val (11)
+            
             height, width = self.size_candidate[0], self.size_candidate[1]
-            self._current_grid_img[0:height, 150:150+width] = empty_val 
+            
+            if rand_init:
+                # 20% chance to start with completely empty grid
+                if np.random.random() < 0.2:
+                    # Fill only the size_candidate area with empty_val (11)
+                    self._current_grid_img[0:height, 150:150+width] = empty_val
+                else:
+                    # Randomly initialize some cells in size_candidate area with correct answers
+                    target_solution = self._target_grid_img[0:height, 150:150+width]
+                    current_solution = np.full((height, width), empty_val)  # Start with empty
+                    
+                    # Randomly fill some percentage of correct answers
+                    fill_ratio = np.random.uniform(0.2, 0.7)  # 20%-70% pre-filled
+                    total_cells = height * width
+                    num_filled = int(total_cells * fill_ratio)
+                    
+                    # Get random positions to fill
+                    positions = [(i, j) for i in range(height) for j in range(width)]
+                    filled_positions = np.random.choice(len(positions), num_filled, replace=False)
+                    
+                    for pos_idx in filled_positions:
+                        i, j = positions[pos_idx]
+                        current_solution[i, j] = target_solution[i, j]
+                    
+                    self._current_grid_img[0:height, 150:150+width] = current_solution
+            else:
+                # Fill only the size_candidate area with empty_val (11)
+                self._current_grid_img[0:height, 150:150+width] = empty_val 
         elif reset_sol_grid == 'random':
             # ! 여기서 solution에 해당하는 부분을 랜덤으로 초기화해도 좋을듯?
             rand_grid = np.random.randint(low=0,
