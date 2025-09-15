@@ -329,16 +329,32 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
     def reset(self,
               seed: Optional[int] = None,
               options: Optional[dict] = None):
+        print(options)
+        self.task_id = None
+        self.pair_idx = None
+        self.size_candidate = None
+        self.color_candidate = None 
+        
         if options != None:
             mode = options['mode']
             self.task_id = options['task_id']
             self.pair_idx = options['pair_idx']
+            self.color_candidate = options['color_candidate']
+            self.size_candidate = options['size_candidate']
             reset_sol_grid = options['reset_sol_grid']
+        
+        if self.size_candidate == None:
+            self.size_candidate = [4, 4]  # Default for task 3cd86f4f
+            
+        if self.color_candidate == None:
+            self.color_candidate = [0, 1, 4, 5, 9]  # Default for task 3cd86f4f
     
         self.timestep = 0
         if self.task_id == None:
             self.task_id = self._select_task(seed)
-            
+        
+        # Set size_candidate and color_candidate from options or use defaults FIRST
+        
         self.episode_returns = 0
         self.episode_lengths = 0
         """
@@ -367,17 +383,6 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
             elif mode == 'evaluation' or mode == 'eval':
                 self._target_grid_img = self.eval_task_img_dict[self.task_id][self.pair_idx]
         self.test_input_idx = self.pair_idx
-        
-        # Set size_candidate and color_candidate from options or use defaults FIRST
-        if options and 'size_candidate' in options:
-            self.size_candidate = options['size_candidate']
-        else:
-            self.size_candidate = [4, 4]  # Default for task 3cd86f4f
-            
-        if options and 'color_candidate' in options:
-            self.color_candidate = options['color_candidate']
-        else:
-            self.color_candidate = [0, 1, 4, 5, 9]  # Default for task 3cd86f4f
         
         # Get rand_init option
         rand_init = options.get('rand_init', False) if options else False
@@ -641,28 +646,48 @@ class ArcAgiWrapper(Wrapper):
         self.pair_idx = pair_idx
     
     def reset(self, *args, **kwargs,):
+        size_candidate = None
+        color_candidate = None
+        if 'seed' in kwargs:
+            seed = kwargs['seed']
+        if 'options' in kwargs:
+            if 'size_candidate' in kwargs['options'].keys():
+                size_candidate = kwargs['options']['size_candidate']
+            if 'color_candidate' in kwargs['options'].keys():
+                color_candidate = kwargs['options']['color_candidate']
         if self.fixed_task and not self.fixed_pair_idx:
             options = {'mode': 'train',
                     'task_id': self.task_id, # 794b24be, 3cd86f4f
                     'pair_idx': None, 
-                    'reset_sol_grid': 'padding',}
+                    'reset_sol_grid': 'padding',
+                    'size_candidate': size_candidate,
+                    'color_candidate': color_candidate,}
         elif self.fixed_task and self.fixed_pair_idx:
             options = {'mode': 'train',
                     'task_id': self.task_id, # 794b24be, 3cd86f4f
                     'pair_idx': self.pair_idx, 
-                    'reset_sol_grid': 'padding',}
+                    'reset_sol_grid': 'padding',
+                    'size_candidate': size_candidate,
+                    'color_candidate': color_candidate,
+                    }
         elif not self.fixed_task and self.fixed_pair_idx:
             options = {'mode': 'train',
                     'task_id': None, # 794b24be, 3cd86f4f
                     'pair_idx': self.pair_idx, 
-                    'reset_sol_grid': 'padding',}
+                    'reset_sol_grid': 'padding',
+                    'size_candidate': size_candidate,
+                    'color_candidate': color_candidate,
+                    }
         else:
             options = {'mode': 'train',
                     'task_id': None, # 794b24be, 3cd86f4f
                     'pair_idx': None, 
-                    'reset_sol_grid': 'padding',}
+                    'reset_sol_grid': 'padding',
+                    'size_candidate': size_candidate,
+                    'color_candidate': color_candidate,
+                    }
         # task_id를 항상 포함시켜서 reset 호출
-        return self.env.reset(options=options,)
+        return self.env.reset(seed=seed, options=options,)
     
     def __getattr__(self, name):
         """
