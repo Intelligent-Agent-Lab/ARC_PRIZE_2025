@@ -714,3 +714,43 @@ def vectorized_action_converter(actions: torch.Tensor) -> dict:
         'coordinate': torch.stack([rows, cols], dim=-1).numpy()  # (N, 2) 형태
     }
     return result
+
+
+def convert_dict_to_int(dict_action: dict,
+                        ) -> int:
+    """
+    딕셔너리 액션을 정수 액션으로 변환하는 벡터화된 함수
+    Args:
+        dict_actions: {
+            'color': numpy array or torch.Tensor of shape (,),
+            'coordinate': numpy array or torch.Tensor of shape (2,)
+        }
+    Returns:
+        np.ndarray: 정수 액션들 (N,)
+    """
+    color = dict_action['color']
+    coordinate = dict_action['coordinate']
+    int_action = color * 900 + coordinate[0]*30 + coordinate[1]
+    return int_action
+
+
+def vectorized_convert_dict_to_int(dict_actions: dict) -> np.ndarray:
+    """
+    딕셔너리 액션들을 정수 액션들로 변환하는 벡터화된 함수
+    Args:
+        dict_actions: {
+            'color': numpy array or torch.Tensor of shape (N,),
+            'coordinate': numpy array or torch.Tensor of shape (N, 2)
+        }
+    Returns:
+        np.ndarray: 정수 액션들 (N,)
+    """
+    colors = dict_actions['color']
+    coordinates = dict_actions['coordinate']
+    
+    # 벡터화된 계산: int_action = color * 900 + row * 30 + col
+    # coordinates는 (N, 2) 형태이므로 coordinates[:, 0]이 row, coordinates[:, 1]이 col
+    rows = coordinates[:, 0]
+    cols = coordinates[:, 1]
+    int_actions = colors * 900 + rows * 30 + cols
+    return int_actions
