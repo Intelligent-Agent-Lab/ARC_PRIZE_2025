@@ -14,6 +14,7 @@ environment:
   task_id: '3cd86f4f'
   pair_idx: 0
   seed: 42
+  rand_init: true
   
   # Vectorized environment specific settings
   num_envs: 4  # Number of parallel environments
