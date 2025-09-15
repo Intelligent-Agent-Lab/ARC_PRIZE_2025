@@ -392,10 +392,6 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         if len(valid_colors) == 0:
             raise ValueError("Cannot determine color candidates: no valid colors (0-9) found in solution area")
         self.color_candidate = valid_colors.tolist()
-        
-        print('=====================================================')
-        print(f"Color candidate: {self.color_candidate}")
-        print(f"Size candidate: {self.size_candidate}")
 
         # Get rand_init option
         rand_init = options.get('rand_init', False) if options else False
