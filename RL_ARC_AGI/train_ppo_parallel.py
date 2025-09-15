@@ -281,8 +281,8 @@ class ArcAgiVectorizedTrainer:
                                                 evaluation_solutions_json,
                                                 test_challenges_json,
                                             )
-        train_task_img_dict, _ = preprocess_data(training_challenges, training_solutions)
-        eval_task_img_dict, _ = preprocess_data(evaluation_challenges, evaluation_solutions)
+        train_task_img_dict, _, train_img_shape_colors, _ = preprocess_data(training_challenges, training_solutions)
+        eval_task_img_dict, _, eval_img_shape_colors, _= preprocess_data(evaluation_challenges, evaluation_solutions)
 
         self.task_id_list = list(self.config.environment.task_id_list)
         self.seed = self.config.environment.seed

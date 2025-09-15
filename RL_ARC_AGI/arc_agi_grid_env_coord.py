@@ -13,6 +13,7 @@ import matplotlib.pyplot as plt
 import random
 from matplotlib.colors import ListedColormap, Normalize
 import torch 
+from dataclasses import dataclass
 
 cmap = colors.ListedColormap(
     [
@@ -32,7 +33,13 @@ cmap = colors.ListedColormap(
 norm = colors.Normalize(vmin=0, vmax=11)
 
 
-def preprocess_data(challenges: Dict[str, Any], solutions: Dict[str, Any]) -> Tuple[Dict[str, List], Dict[str, List]]:
+@dataclass
+class ActiveShapeColor:
+    row: int
+    col: int
+    color: List[int]
+
+def preprocess_data(challenges: Dict[str, Any], solutions: Dict[str, Any]) -> Tuple[Dict[str, List], Dict[str, List], Dict[str, List], Dict[str, List]]:
     """
     Optimized preprocessing function for ARC AGI 2 dataset.
     
@@ -41,13 +48,15 @@ def preprocess_data(challenges: Dict[str, Any], solutions: Dict[str, Any]) -> Tu
         solutions: Dictionary containing solution data
         
     Returns:
-        Tuple of (dict_XYXYXY_img_pairs, dict_XYXYXY_seq_pairs)
+        Tuple of (dict_XYXYXY_img_pairs, dict_XYXYXY_seq_pairs, dict_XYXYXY_img_shape_colors, dict_XYXYXY_seq_shape_colors)
     """
     MAX_SHAPE = (30, 30)
     PAD_VAL = 10
     
     dict_XYXYXY_img_pairs = {}
     dict_XYXYXY_seq_pairs = {}
+    dict_XYXYXY_img_shape_colors = {}
+    dict_XYXYXY_seq_shape_colors = {}
     
     # Process each task
     for task_id, task_data in challenges.items():
@@ -62,23 +71,29 @@ def preprocess_data(challenges: Dict[str, Any], solutions: Dict[str, Any]) -> Tu
         
         # Process test pairs
         test_inputs = task_data.get('test', [])
-        test_pairs_img, test_pairs_seq = _process_test_pairs(
+        test_pairs_img, test_pairs_seq, shape_color_infos = _process_test_pairs(
             test_inputs, 
             task_sol, 
             MAX_SHAPE, 
             PAD_VAL
         )
         
-        # Generate XYXYXY pairs efficiently
-        dict_XYXYXY_img_pairs[task_id] = _generate_xyxyxy_pairs(
-            train_pairs_img, test_pairs_img, is_sequence=False
+        # Generate XYXYXY pairs efficiently with shape color info
+        img_pairs, img_shape_colors = _generate_xyxyxy_pairs(
+            train_pairs_img, test_pairs_img, shape_color_infos, is_sequence=False
         )
         
-        dict_XYXYXY_seq_pairs[task_id] = _generate_xyxyxy_pairs(
-            train_pairs_seq, test_pairs_seq, is_sequence=True
+        seq_pairs, seq_shape_colors = _generate_xyxyxy_pairs(
+            train_pairs_seq, test_pairs_seq, shape_color_infos, is_sequence=True
         )
+        
+        dict_XYXYXY_img_pairs[task_id] = img_pairs
+        dict_XYXYXY_seq_pairs[task_id] = seq_pairs
+        dict_XYXYXY_img_shape_colors[task_id] = img_shape_colors
+        dict_XYXYXY_seq_shape_colors[task_id] = seq_shape_colors
+        
     
-    return dict_XYXYXY_img_pairs, dict_XYXYXY_seq_pairs
+    return dict_XYXYXY_img_pairs, dict_XYXYXY_seq_pairs, dict_XYXYXY_img_shape_colors, dict_XYXYXY_seq_shape_colors
 
 
 def _pad_grid(grid: np.ndarray, target_shape: Tuple[int, int], pad_val: int) -> np.ndarray:
@@ -119,10 +134,11 @@ def _process_pairs(pairs: List[Dict], max_shape: Tuple[int, int], pad_val: int) 
     return img_pairs, seq_pairs
 
 
-def _process_test_pairs(test_inputs: List[Dict], solutions: List, max_shape: Tuple[int, int], pad_val: int) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+def _process_test_pairs(test_inputs: List[Dict], solutions: List, max_shape: Tuple[int, int], pad_val: int) -> Tuple[List[np.ndarray], List[np.ndarray], List[ActiveShapeColor]]:
     """Process test pairs with their solutions."""
     img_pairs = []
     seq_pairs = []
+    shape_color_infos = []
     
     for test_input, solution in zip(test_inputs, solutions):
         input_grid = np.array(test_input['input'])
@@ -136,19 +152,37 @@ def _process_test_pairs(test_inputs: List[Dict], solutions: List, max_shape: Tup
         xy_img = np.concatenate([padded_input, padded_output], axis=1)
         img_pairs.append(xy_img)
         
+        shape_color = ActiveShapeColor(
+                        row=output_grid.shape[0],
+                        col=output_grid.shape[1],
+                        color=np.unique(output_grid).tolist()   
+                        )
+        shape_color_infos.append(shape_color)
+        
         # Sequence format
         seq_input = padded_input.flatten()
         seq_output = padded_output.flatten()
         xy_seq = np.concatenate([seq_input, seq_output])
         seq_pairs.append(xy_seq)
     
-    return img_pairs, seq_pairs
+    return img_pairs, seq_pairs, shape_color_infos
 
 
-def _generate_xyxyxy_pairs(train_pairs: List[np.ndarray], test_pairs: List[np.ndarray], is_sequence: bool) -> List[np.ndarray]:
-    """Generate XYXYXY pairs from training and test data."""
+def _generate_xyxyxy_pairs(train_pairs: List[np.ndarray], test_pairs: List[np.ndarray], shape_color_infos: List[ActiveShapeColor], is_sequence: bool) -> Tuple[List[np.ndarray], List[ActiveShapeColor]]:
+    """
+    Generate XYXYXY pairs from training and test data with corresponding shape color info.
+    
+    Args:
+        train_pairs: List of training pairs (XY format)
+        test_pairs: List of test pairs (XY format)  
+        shape_color_infos: List of ActiveShapeColor for each test pair
+        is_sequence: Whether the data is in sequence format
+        
+    Returns:
+        Tuple of (xyxyxy_pairs, corresponding_shape_color_infos)
+    """
     if not train_pairs or not test_pairs:
-        return []
+        return [], []
     
     # Generate all training pair permutations (XYXY format)
     train_xyxy_pairs = []
@@ -159,16 +193,24 @@ def _generate_xyxyxy_pairs(train_pairs: List[np.ndarray], test_pairs: List[np.nd
             xyxy_pair = np.hstack(p)
         train_xyxy_pairs.append(xyxy_pair)
     
-    # Generate XYXYXY combinations
+    # Generate XYXYXY combinations with corresponding shape color info
     xyxyxy_pairs = []
-    for train_pair, test_pair in product(train_xyxy_pairs, test_pairs):
-        if is_sequence:
-            xyxyxy_pair = np.concatenate([train_pair, test_pair])
-        else:
-            xyxyxy_pair = np.hstack([train_pair, test_pair])
-        xyxyxy_pairs.append(xyxyxy_pair)
+    corresponding_shape_colors = []
     
-    return xyxyxy_pairs
+    for train_pair in train_xyxy_pairs:
+        for test_idx, test_pair in enumerate(test_pairs):
+            # Create XYXYXY pair
+            if is_sequence:
+                xyxyxy_pair = np.concatenate([train_pair, test_pair])
+            else:
+                xyxyxy_pair = np.hstack([train_pair, test_pair])
+            
+            xyxyxy_pairs.append(xyxyxy_pair)
+            
+            # Add corresponding shape color info
+            corresponding_shape_colors.append(shape_color_infos[test_idx])
+    
+    return xyxyxy_pairs, corresponding_shape_colors
 
 
 # Memory-efficient version for large datasets
