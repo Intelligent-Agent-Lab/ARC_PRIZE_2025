@@ -143,106 +143,80 @@ class PPOAgent:
         return action, probs.log_prob(action), probs.entropy(), value
     
     def _create_action_mask(self, obs, obs_info):
-        """Create action mask based on observation and info."""
+        """Create action mask based on observation and info (vectorized version)."""
         batch_size = obs.shape[0] if obs.dim() > 1 else 1
         if batch_size == 1:
             obs = obs.unsqueeze(0)
-        
-        action_mask = torch.full((batch_size, 9000), 0.0, device=self.device)
-        
+
+        action_mask = torch.zeros((batch_size, 9000), device=self.device)
+
         if obs_info is None:
             return action_mask.squeeze(0) if batch_size == 1 else action_mask
-        
+
         for i in range(batch_size):
             try:
-                # Get current observation and info for this batch
                 current_obs = obs[i]  # Shape: (30, 180)
-                current_info = None
-                
-                # Handle vectorized environment info structure
-                if obs_info is not None:
-                    if isinstance(obs_info, dict):
-                        # Vectorized environment returns flattened dict
-                        # Extract info for environment i
-                        current_info = {}
-                        if 'size_candidate' in obs_info:
-                            if len(obs_info['size_candidate']) > i:
-                                val = obs_info['size_candidate'][i]
-                                # Handle numpy array of lists from vectorized env
-                                if hasattr(val, 'tolist'):
-                                    current_info['size_candidate'] = val.tolist()
-                                elif isinstance(val, (list, tuple)):
-                                    current_info['size_candidate'] = list(val)
-                                else:
-                                    current_info['size_candidate'] = val
-                        if 'color_candidate' in obs_info:
-                            if len(obs_info['color_candidate']) > i:
-                                val = obs_info['color_candidate'][i]
-                                # Handle numpy array of lists from vectorized env
-                                if hasattr(val, 'tolist'):
-                                    current_info['color_candidate'] = val.tolist()
-                                elif isinstance(val, (list, tuple)):
-                                    current_info['color_candidate'] = list(val)
-                                else:
-                                    current_info['color_candidate'] = val
-                    elif isinstance(obs_info, list) and len(obs_info) > i:
-                        current_info = obs_info[i]
-                
-                # Get solution area (150:180)
                 solution_area = current_obs[:, 150:]  # Shape: (30, 30)
-                
-                # Get target size (default to [4, 4])
+
+                # Extract current info
+                current_info = self._extract_current_info(obs_info, i)
                 size_candidate = current_info.get('size_candidate', [4, 4]) if current_info else [4, 4]
+                valid_colors = set(current_info.get('color_candidate', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]) if current_info else [0, 1, 2, 3, 4, 5, 6, 7, 8, 9])
+
                 target_rows, target_cols = size_candidate[0], size_candidate[1]
-                
-                # Only consider positions within the target size area
-                valid_positions = torch.zeros_like(solution_area, dtype=torch.bool)
+
+                # Create position and color masks vectorized
                 if target_rows > 0 and target_cols > 0:
-                    # Only the top-left target_rows x target_cols area is valid
-                    target_area = solution_area[:target_rows, :target_cols]
-                    valid_positions[:target_rows, :target_cols] = (target_area == 11)
-                
-                # Get valid colors from color_candidate
-                valid_colors = current_info.get('color_candidate', [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]) if current_info else [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
-                
-                
-                # Count statistics for logging
-                total_valid_positions = torch.sum(valid_positions).item()
-                total_actions = 9000
-                masked_actions = 0
-                
-                # Create mask: action_idx = color * 900 + row * 30 + col
-                for row in range(30):
-                    for col in range(30):
-                        if not valid_positions[row, col]:
-                            # If position is not valid (not 11), mask all colors for this position
-                            start_idx = row * 30 + col
-                            for color in range(10):
-                                action_idx = color * 900 + start_idx
-                                action_mask[i, action_idx] = -1e9
-                                masked_actions += 1
+                    # Valid positions (30x30 grid)
+                    valid_positions = torch.zeros(30, 30, dtype=torch.bool, device=self.device)
+                    valid_positions[:target_rows, :target_cols] = (solution_area[:target_rows, :target_cols] == 11)
+
+                    # Create position indices grid (row * 30 + col)
+                    row_indices = torch.arange(30, device=self.device).view(-1, 1).expand(30, 30)
+                    col_indices = torch.arange(30, device=self.device).view(1, -1).expand(30, 30)
+                    position_indices = row_indices * 30 + col_indices
+
+                    # Vectorized masking for each color
+                    for color in range(10):
+                        color_offset = color * 900
+                        color_action_indices = color_offset + position_indices
+
+                        if color not in valid_colors:
+                            # Mask all positions for invalid colors
+                            action_mask[i, color_action_indices.flatten()] = -1e9
                         else:
-                            # If position is valid, only allow valid colors
-                            start_idx = row * 30 + col
-                            for color in range(10):
-                                if color not in valid_colors:
-                                    action_idx = color * 900 + start_idx
-                                    action_mask[i, action_idx] = -1e9
-                                    masked_actions += 1
-                
-                # Log masking statistics occasionally
-                if hasattr(self, 'mask_log_counter'):
-                    self.mask_log_counter += 1
-                else:
-                    self.mask_log_counter = 1
-                    
-                # Removed excessive logging
+                            # Mask only invalid positions for valid colors
+                            invalid_pos_mask = ~valid_positions
+                            if invalid_pos_mask.any():
+                                invalid_actions = color_action_indices[invalid_pos_mask]
+                                action_mask[i, invalid_actions] = -1e9
+
             except Exception as e:
                 print(f"Warning: Could not create action mask for batch {i}: {e}")
-                # Continue without masking for this batch
                 continue
-        
+
         return action_mask.squeeze(0) if batch_size == 1 else action_mask
+
+    def _extract_current_info(self, obs_info, i):
+        """Helper to extract info for batch index i."""
+        if obs_info is None:
+            return None
+
+        current_info = {}
+        if isinstance(obs_info, dict):
+            for key in ['size_candidate', 'color_candidate']:
+                if key in obs_info and len(obs_info[key]) > i:
+                    val = obs_info[key][i]
+                    if hasattr(val, 'tolist'):
+                        current_info[key] = val.tolist()
+                    elif isinstance(val, (list, tuple)):
+                        current_info[key] = list(val)
+                    else:
+                        current_info[key] = val
+        elif isinstance(obs_info, list) and len(obs_info) > i:
+            current_info = obs_info[i]
+
+        return current_info
         
     def reset_storage(self):
         """Reset storage for collecting rollout data."""
