@@ -305,23 +305,126 @@ class ArcAgiVectorizedTrainer:
         # Calculate action space size
         obs_size = np.prod(self.envs.single_observation_space.shape)
         action_size = 9000 # 10 colors * 30x30 coordinate space
-        
+
         print(f"setup_agent. obs_size: {obs_size}, action_size: {action_size}")
-        
-        # Set device
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        
-        # Create agent
+
+        # Set device and multi-GPU configuration
+        if hasattr(self.config.training, 'use_multi_gpu') and self.config.training.use_multi_gpu:
+            if torch.cuda.device_count() > 1:
+                print(f"Using {torch.cuda.device_count()} GPUs for batch distribution")
+                self.device = torch.device("cuda:0")  # Primary device for model
+                self.use_multi_gpu = True
+                if hasattr(self.config.training, 'gpu_devices'):
+                    self.gpu_devices = self.config.training.gpu_devices[:torch.cuda.device_count()]
+                else:
+                    self.gpu_devices = list(range(torch.cuda.device_count()))
+                print(f"Available GPUs for batch processing: {self.gpu_devices}")
+            else:
+                print("Multi-GPU requested but only 1 GPU available, using single GPU")
+                self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                self.use_multi_gpu = False
+                self.gpu_devices = [0]
+        else:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.use_multi_gpu = False
+            self.gpu_devices = [0]
+
+        # Create agent (model stays on primary GPU)
         self.agent = Agent(self.config).to(self.device)
-        
+
+        # Create model replicas on other GPUs for batch distribution
+        if self.use_multi_gpu and len(self.gpu_devices) > 1:
+            self.agents_on_gpus = {}
+            for gpu_id in self.gpu_devices:
+                if gpu_id != 0:  # Primary model is already on GPU 0
+                    agent_replica = Agent(self.config).to(f'cuda:{gpu_id}')
+                    agent_replica.load_state_dict(self.agent.state_dict())
+                    self.agents_on_gpus[gpu_id] = agent_replica
+            print(f"Created model replicas on GPUs: {list(self.agents_on_gpus.keys())}")
+        else:
+            self.agents_on_gpus = {}
+
         # Create optimizer
         self.optimizer = optim.Adam(
-            self.agent.parameters(), 
-            lr=self.config.training.learning_rate, 
+            self.agent.parameters(),
+            lr=self.config.training.learning_rate,
             eps=1e-5
         )
-        self.mini_batch_size = int(self.config.environment.num_steps * self.config.environment.num_envs / self.config.training.num_minibatches)
+
+        # Adjust batch size for multi-GPU training
+        if hasattr(self.config.training, 'batch_size_total') and self.use_multi_gpu:
+            total_batch_size = self.config.training.batch_size_total
+            self.mini_batch_size = int(total_batch_size / self.config.training.num_minibatches)
+            # Ensure mini_batch_size is divisible by number of GPUs for even distribution
+            if self.mini_batch_size % len(self.gpu_devices) != 0:
+                self.mini_batch_size = (self.mini_batch_size // len(self.gpu_devices)) * len(self.gpu_devices)
+                print(f"Adjusted mini_batch_size to {self.mini_batch_size} for even GPU distribution")
+        else:
+            self.mini_batch_size = int(self.config.environment.num_steps * self.config.environment.num_envs / self.config.training.num_minibatches)
+
         print(f"PPO Agent created with device: {self.device}")
+        print(f"Multi-GPU batch distribution enabled: {self.use_multi_gpu}")
+        print(f"Mini batch size: {self.mini_batch_size}")
+        if self.use_multi_gpu:
+            print(f"Batch size per GPU: {self.mini_batch_size // len(self.gpu_devices)}")
+
+    def sync_model_replicas(self):
+        """Sync model replicas with the primary model."""
+        if self.use_multi_gpu and self.agents_on_gpus:
+            primary_state = self.agent.state_dict()
+            for gpu_id, agent_replica in self.agents_on_gpus.items():
+                agent_replica.load_state_dict(primary_state)
+
+    def process_batch_multi_gpu(self, batch_obs, batch_actions):
+        """Process batch across multiple GPUs and gather results."""
+        if not self.use_multi_gpu or len(self.gpu_devices) == 1:
+            # Single GPU processing
+            return self.agent.get_action_and_value(batch_obs, batch_actions)
+
+        # Sync model replicas with primary model
+        self.sync_model_replicas()
+
+        # Split batch across GPUs
+        batch_size = batch_obs.shape[0]
+        chunk_size = batch_size // len(self.gpu_devices)
+
+        results = []
+        for i, gpu_id in enumerate(self.gpu_devices):
+            start_idx = i * chunk_size
+            end_idx = start_idx + chunk_size if i < len(self.gpu_devices) - 1 else batch_size
+
+            # Move chunk to specific GPU
+            chunk_obs = batch_obs[start_idx:end_idx].to(f'cuda:{gpu_id}')
+            chunk_actions = batch_actions[start_idx:end_idx].to(f'cuda:{gpu_id}') if batch_actions is not None else None
+
+            # Use appropriate model (primary or replica)
+            if gpu_id == 0:
+                agent_to_use = self.agent
+            else:
+                agent_to_use = self.agents_on_gpus[gpu_id]
+
+            # Process chunk
+            if chunk_actions is not None:
+                chunk_result = agent_to_use.get_action_and_value(chunk_obs, chunk_actions)
+            else:
+                chunk_result = agent_to_use.get_action_and_value(chunk_obs)
+
+            # Move results back to primary device
+            chunk_result = [tensor.to(self.device) if tensor is not None else None for tensor in chunk_result]
+            results.append(chunk_result)
+
+        # Concatenate results
+        if results:
+            concatenated = []
+            for tensor_idx in range(len(results[0])):
+                tensors = [result[tensor_idx] for result in results if result[tensor_idx] is not None]
+                if tensors:
+                    concatenated.append(torch.cat(tensors, dim=0))
+                else:
+                    concatenated.append(None)
+            return tuple(concatenated)
+
+        return self.agent.get_action_and_value(batch_obs, batch_actions)
         
     def setup_logging(self):
         """Setup logging and metrics tracking."""
@@ -512,7 +615,7 @@ class ArcAgiVectorizedTrainer:
                 end = start + self.mini_batch_size
                 mb_inds = b_inds[start:end]
 
-                _, newlogprob, entropy, newvalue = self.agent.get_action_and_value(b_obs[mb_inds], b_actions.long()[mb_inds])
+                _, newlogprob, entropy, newvalue = self.process_batch_multi_gpu(b_obs[mb_inds], b_actions.long()[mb_inds])
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
 
@@ -549,10 +652,21 @@ class ArcAgiVectorizedTrainer:
                 entropy_loss = entropy.mean()
                 loss = pg_loss - self.config.training.entropy_coef * entropy_loss + v_loss * self.config.training.value_coef
 
+                # Handle gradient accumulation for multi-GPU training
+                if hasattr(self.config.training, 'gradient_accumulation_steps'):
+                    loss = loss / self.config.training.gradient_accumulation_steps
+
                 self.optimizer.zero_grad()
                 loss.backward()
-                nn.utils.clip_grad_norm_(self.agent.parameters(), self.config.training.max_grad_norm)
-                self.optimizer.step()
+
+                # Gradient accumulation step
+                if hasattr(self.config.training, 'gradient_accumulation_steps') and self.config.training.gradient_accumulation_steps > 1:
+                    if (start // self.mini_batch_size + 1) % self.config.training.gradient_accumulation_steps == 0:
+                        nn.utils.clip_grad_norm_(self.agent.parameters(), self.config.training.max_grad_norm)
+                        self.optimizer.step()
+                else:
+                    nn.utils.clip_grad_norm_(self.agent.parameters(), self.config.training.max_grad_norm)
+                    self.optimizer.step()
 
             if self.config.training.target_kl is not None and approx_kl > self.config.training.target_kl:
                 break

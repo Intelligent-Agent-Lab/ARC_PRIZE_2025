@@ -15,7 +15,7 @@ environment:
   pair_idx: 0
   seed: 42
   rand_init: true
-  
+
   # Vectorized environment specific settings
   num_envs: 4  # Number of parallel environments
   num_steps: 128  # Number of steps per environment per rollout
@@ -32,12 +32,18 @@ training:
   entropy_coef: 0.01
   max_grad_norm: 0.5
   anneal_lr: true  # Learning rate annealing
-  
+
   # Additional PPO hyperparameters for vectorized training
   norm_adv: true  # Advantage normalization
   clip_vloss: true  # Value function clipping
   target_kl: null  # Target KL divergence (null means no early stopping)
   num_minibatches: 8  # Number of mini-batches for optimization
+
+  # Multi-GPU configuration (single machine) - batch distribution only
+  use_multi_gpu: false  # Enable multi-GPU batch processing
+  gpu_devices: [0, 1, 2, 3]  # GPU device indices to use for batch distribution
+  batch_size_total: 512  # Total batch size distributed across all GPUs
+  gradient_accumulation_steps: 1  # Steps to accumulate gradients
 
 # Network configuration
 network:
