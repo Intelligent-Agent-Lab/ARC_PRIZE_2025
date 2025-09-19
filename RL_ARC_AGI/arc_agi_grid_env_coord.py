@@ -324,23 +324,14 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
             "episode_lengths": self.episode_lengths,
             "size_candidate": self.size_candidate,
             "color_candidate": self.color_candidate,
+            "is_success": self.is_success,
+            "ratio_fill_correct": self.ratio_fill_correct,
+            "ratio_fill_incorrect": self.ratio_fill_incorrect,
         }
 
     def reset(self,
               seed: Optional[int] = None,
               options: Optional[dict] = None):
-        if options != None:
-            mode = options['mode']
-            self.task_id = options['task_id']
-            self.pair_idx = options['pair_idx']
-            reset_sol_grid = options['reset_sol_grid']
-    
-        self.timestep = 0
-        if self.task_id == None:
-            self.task_id = self._select_task(seed)
-            
-        self.episode_returns = 0
-        self.episode_lengths = 0
         """
         Args:
             seed: Random seed for reproducible episodes
@@ -349,11 +340,27 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         Returns:
             tuple: (observation, info) for the initial state
         """
+        
+        
+        self.is_success = False
+
+        if options != None:
+            mode = options['mode']
+            self.task_id = options['task_id']
+            self.pair_idx = options['pair_idx']
+    
+        self.timestep = 0
+        if self.task_id == None:
+            self.task_id = self._select_task(seed)
+            
+        self.episode_returns = 0
+        self.episode_lengths = 0
+
         # IMPORTANT: Must call this first to seed the random number generator
         # super().reset(seed=seed)
         random.seed(seed)
         np.random.seed(seed)
-        # task_id에 해당하는 target grid 선택 (test input이 여러 개 존재 가능하므로 한 번 더 random.choice 수행
+        # task_id에 해당하는 target grid 선택 (train input output, test input이 여러 개 존재 가능하므로 한 번 더 random.choice 수행
         if self.pair_idx == None:
             if mode == 'train':
                 self.pair_idx = random.choice(list(range(len(self.train_task_img_dict[self.task_id]))))
@@ -392,55 +399,60 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         if len(valid_colors) == 0:
             raise ValueError("Cannot determine color candidates: no valid colors (0-9) found in solution area")
         self.color_candidate = valid_colors.tolist()
-
+        self.max_sum_reward = 0.05 * (self.size_candidate[0] * self.size_candidate[1] - 1) + 1
+        
         # Get rand_init option
-        rand_init = options.get('rand_init', False) if options else False
+        self.rand_init: bool = options.get('rand_init', False) if options else False
+        self.ratio_fill_correct: float = options.get('ratio_fill_correct', 0.0) if options else 0.0
+        self.ratio_fill_incorrect: float = options.get('ratio_fill_incorrect', 0.0) if options else 0.0
         
         # target grid에서 test solution에 해당하는 부분을 전부 pad_val으로 masking하고 current grid로 할당
-        if reset_sol_grid == 'padding':
-            empty_val = 11
-            self._current_grid_img = self._target_grid_img.copy()
+        self._chosen_grid_img = np.zeros([30, 30]).astype(int)
+        empty_val = 11
+        self._current_grid_img = self._target_grid_img.copy()
+        if self.rand_init:
             # Fill the solution area with different values based on size_candidate
             self._current_grid_img[0:30, 150:] = 10  # Fill entire solution area with 10 first
-            
             height, width = self.size_candidate[0], self.size_candidate[1]
-            
-            if rand_init:
-                # 20% chance to start with completely empty grid
-                if np.random.random() < 0.2:
-                    # Fill only the size_candidate area with empty_val (11)
-                    self._current_grid_img[0:height, 150:150+width] = empty_val
-                else:
-                    # Randomly initialize some cells in size_candidate area with correct answers
-                    target_solution = self._target_grid_img[0:height, 150:150+width]
-                    current_solution = np.full((height, width), empty_val)  # Start with empty
-                    
-                    # Randomly fill some percentage of correct answers
-                    fill_ratio = np.random.uniform(0.2, 0.7)  # 20%-70% pre-filled
-                    total_cells = height * width
-                    num_filled = int(total_cells * fill_ratio)
-                    
-                    # Get random positions to fill
+            total_cells = height * width
+
+            assert (self.ratio_fill_correct + self.ratio_fill_incorrect) <= 1.0
+
+            if self.ratio_fill_correct > 0.0 or self.ratio_fill_incorrect > 0.0:
+                # Randomly initialize some cells in size_candidate area with correct answers or incorrect answers
+                target_solution = self._target_grid_img[0:height, 150:150+width]
+                current_solution = np.full((height, width), empty_val)  # Start with empty
+                
+                # 랜덤 값 채우기
+                if self.ratio_fill_incorrect > 0.0:
+                    incorrect_num_filled = int(total_cells * self.ratio_fill_incorrect)
+                    incorrect_positions = [(i, j) for i in range(height) for j in range(width)]
+                    incorrect_filled_positions = np.random.choice(len(incorrect_positions), incorrect_num_filled, replace=False)
+                    for pos_idx in incorrect_filled_positions:
+                        i, j = incorrect_positions[pos_idx]
+                        random_color = np.random.randint(low=0, high=9)
+                        if random_color == target_solution[i, j]:
+                            # 정답으로 채워진 경우, 이미 선택한 것으로 간주함
+                            self._chosen_grid_img[i, j] +=1
+                        current_solution[i, j] = random_color
+                
+                # 정답 값 채우기
+                if self.ratio_fill_correct > 0.0:
+                    num_filled = int(total_cells * self.ratio_fill_correct)
                     positions = [(i, j) for i in range(height) for j in range(width)]
                     filled_positions = np.random.choice(len(positions), num_filled, replace=False)
-                    
                     for pos_idx in filled_positions:
                         i, j = positions[pos_idx]
                         current_solution[i, j] = target_solution[i, j]
-                    
-                    self._current_grid_img[0:height, 150:150+width] = current_solution
-            else:
-                # Fill only the size_candidate area with empty_val (11)
-                self._current_grid_img[0:height, 150:150+width] = empty_val 
-        elif reset_sol_grid == 'random':
-            # ! 여기서 solution에 해당하는 부분을 랜덤으로 초기화해도 좋을듯?
-            rand_grid = np.random.randint(low=0,
-                                            high=11,
-                                            size=(30, 30))
-            self._current_grid_img = self._target_grid_img.copy()
-            self._current_grid_img[0:30, 150:] = rand_grid
+                        # 정답으로 채워진 경우, 이미 선택한 것으로 간주함
+                        self._chosen_grid_img[i, j] +=1
+                self._current_grid_img[0:height, 150:150+width] = current_solution
+                
 
-        self._chosen_grid_img = np.zeros([30, 30]).astype(int)
+        else: # self.rand_init == False
+            # Fill only the size_candidate area with empty_val (11)
+            self._current_grid_img[0:height, 150:150+width] = empty_val
+            
         
         observation = self._get_obs()
         info = self._get_info()
@@ -452,6 +464,8 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
             action: The action to take (0-10)
         Returns:
             tuple: (observation, reward, terminated, truncated, info)
+            
+        step 함수에서 self.total_reward == self.max_reward 인 경우, self.is_success = True로 변경
         """
         color = action['color']
         coordinate = action['coordinate']
@@ -461,9 +475,7 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         
         # 현재 칸의 값 확인 (action을 취하기 전 값)
         current_cell_value = self._current_grid_img[row, 150+col]
-        
         self._current_grid_img[row, 150+col] = color
-        self._chosen_grid_img[row, col] += 1
         
         # Log grid changes occasionally
         if hasattr(self, 'step_counter'):
@@ -483,13 +495,18 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         terminated = False
         truncated = False
 
-        # 잘못된 위치에 칠하거나, 이미 칠해진 곳에 다시 칠한 경우 (실패)
-        if color != target_color_img or current_cell_value != 11:
+        # 이미 선택한 셀을 또 선택하거나, 미리 정답으로 채워져 있는 셀을 선택하는 경우 실패
+        if self._chosen_grid_img[row, col] > 1:
+            terminated = True
+            reward = -1
+        # 선택한 위치에 틀린 색을 선택한 경우 실패
+        elif color != target_color_img:
             terminated = True
             reward = -1
         else:
             # 퍼즐을 완성한 경우
             if np.array_equal(self._current_grid_img, self._target_grid_img):
+                self.is_success = True
                 terminated = True
                 reward = 1
             # 올바른 중간 과정인 경우 (완성은 아직 아님)
@@ -500,7 +517,7 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         info = self._get_info()
         self.episode_returns += reward
         self.episode_lengths += 1
-        
+        self._chosen_grid_img[row, col] += 1
         return observation, reward, terminated, truncated, info
 
     def plot_chosen_grid(self,):
@@ -643,40 +660,19 @@ class ArcAgiWrapper(Wrapper):
     while maintaining compatibility with Gymnasium's interface.
     """
     
-    def __init__(self, env, 
-                 fixed_task: bool, 
-                 fixed_pair_idx: bool, 
-                task_id: str,
-                pair_idx: int,):
+    def __init__(self, env, ):
         super().__init__(env)
-        self.fixed_task = fixed_task
-        self.fixed_pair_idx = fixed_pair_idx
-        self.task_id = task_id
-        self.pair_idx = pair_idx
-    
+        self.seed = 42
+        self.options = None
+        print(f"init seed: {self.seed}")
+
     def reset(self, *args, **kwargs,):
-        if self.fixed_task and not self.fixed_pair_idx:
-            options = {'mode': 'train',
-                    'task_id': self.task_id, # 794b24be, 3cd86f4f
-                    'pair_idx': None, 
-                    'reset_sol_grid': 'padding',}
-        elif self.fixed_task and self.fixed_pair_idx:
-            options = {'mode': 'train',
-                    'task_id': self.task_id, # 794b24be, 3cd86f4f
-                    'pair_idx': self.pair_idx, 
-                    'reset_sol_grid': 'padding',}
-        elif not self.fixed_task and self.fixed_pair_idx:
-            options = {'mode': 'train',
-                    'task_id': None, # 794b24be, 3cd86f4f
-                    'pair_idx': self.pair_idx, 
-                    'reset_sol_grid': 'padding',}
-        else:
-            options = {'mode': 'train',
-                    'task_id': None, # 794b24be, 3cd86f4f
-                    'pair_idx': None, 
-                    'reset_sol_grid': 'padding',}
-        # task_id를 항상 포함시켜서 reset 호출
-        return self.env.reset(options=options,)
+        if 'seed' in kwargs:
+            self.seed = kwargs['seed']
+            print(f"changed seed: {self.seed}")
+        if 'options' in kwargs:
+            self.options = kwargs['options']
+        return self.env.reset(seed=self.seed, options=self.options,)
     
     def __getattr__(self, name):
         """
@@ -709,19 +705,45 @@ class ArcAgiWrapper(Wrapper):
 
 
 # 사용 예시
-def create_arc_env_coord(
-                        fixed_task: bool, 
-                        fixed_pair_idx: bool,
-                        task_id: str,
-                        pair_idx: int, *args, **kwargs):
+def create_arc_env_coord(training_challenges,
+                        training_solutions,
+                        evaluation_challenges,
+                        evaluation_solutions,
+                        test_challenges,
+                        train_task_img_dict,
+                        eval_task_img_dict):
     """Factory function to create ARC environment with custom wrapper"""
-    base_env = ArcAgiGridEnvCoord(*args, **kwargs)
-    wrapped_env = ArcAgiWrapper(base_env, 
-                                fixed_task, 
-                                fixed_pair_idx,
-                                task_id,
-                                pair_idx,)
+    base_env = ArcAgiGridEnvCoord(training_challenges,
+                                    training_solutions,
+                                    evaluation_challenges,
+                                    evaluation_solutions,
+                                    test_challenges,
+                                    train_task_img_dict,
+                                    eval_task_img_dict)
+    wrapped_env = ArcAgiWrapper(base_env,)
     return wrapped_env
+
+
+def make_env(training_challenges,
+             training_solutions,
+             evaluation_challenges,
+             evaluation_solutions,
+             test_challenges,
+             train_task_img_dict,
+             eval_task_img_dict):
+    """Create and wrap environment for vectorized training."""
+    def thunk():
+        env = create_arc_env_coord(
+                training_challenges=training_challenges,
+                training_solutions=training_solutions,
+                evaluation_challenges=evaluation_challenges,
+                evaluation_solutions=evaluation_solutions,
+                test_challenges=test_challenges,
+                train_task_img_dict=train_task_img_dict,
+                eval_task_img_dict=eval_task_img_dict,
+            )
+        return env
+    return thunk
 
 
 def action_converter(action: int) -> dict:

@@ -19,7 +19,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.distributions.categorical import Categorical
 from network.mlp import ActorCritic_MLP
 from network.vit import ActorCritic_ViT
-from arc_agi_grid_env_coord import cmap
+from arc_agi_grid_env_coord import cmap, make_env
 # Add current directory to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
@@ -80,38 +80,6 @@ def log_action_details(action_tensor, infos, step_num, max_logs=5):
             else:
                 valid_color = "?"
             print(f"    Color validity: {valid_color}")
-
-
-def make_env(fixed_task: bool, 
-             fixed_pair_idx: bool, 
-             task_id: str, 
-             pair_idx: int,
-             training_challenges,
-             training_solutions,
-             evaluation_challenges,
-             evaluation_solutions,
-             test_challenges,
-             train_task_img_dict,
-             eval_task_img_dict):
-    """Create and wrap environment for vectorized training."""
-    def thunk():
-        env = create_arc_env_coord(
-                fixed_task=fixed_task, 
-                fixed_pair_idx=fixed_pair_idx,
-                task_id=task_id,
-                pair_idx=pair_idx,
-                training_challenges=training_challenges,
-                training_solutions=training_solutions, 
-                evaluation_challenges=evaluation_challenges,
-                evaluation_solutions=evaluation_solutions,
-                test_challenges=test_challenges,
-                train_task_img_dict=train_task_img_dict,
-                eval_task_img_dict=eval_task_img_dict,
-            )
-        # env = gym.wrappers.RecordEpisodeStatistics(env)
-        return env
-    return thunk
-
 
 class Agent(nn.Module):
     """Vision Transformer based Actor-Critic network for PPO with grid observations."""
@@ -267,24 +235,27 @@ class ArcAgiVectorizedTrainer:
 
         self.task_id_list = list(self.config.environment.task_id_list)
         self.seed = self.config.environment.seed
-        self.fixed_task = self.config.environment.fixed_task
-        self.fixed_pair_idx = self.config.environment.fixed_pair_idx
-        self.task_id = self.config.environment.task_id
-        self.pair_idx = self.config.environment.pair_idx
+        self.task_id = self.config.environment.task_id # if None task_id is randomly selected
+        self.pair_idx = self.config.environment.pair_idx # if None pair_idx is randomly selected
+        self.rand_init = self.config.environment.rand_init
+        self.ratio_fill_correct = self.config.environment.ratio_fill_correct
+        self.ratio_fill_incorrect = self.config.environment.ratio_fill_incorrect
         self.num_envs = self.config.environment.num_envs
         self.num_steps = self.config.environment.num_steps
         
         # Get size_candidate and color_candidate from config if available
-        self.size_candidate = getattr(self.config.environment, 'size_candidate', [4, 4])
-        self.color_candidate = getattr(self.config.environment, 'color_candidate', [0, 1, 4, 5, 9])
+        if self.task_id != None and self.pair_idx != None:
+            img_shape_color_list = train_img_shape_colors[self.task_id]
+            row = img_shape_color_list[self.pair_idx].row
+            col = img_shape_color_list[self.pair_idx].col
+            size_candidate = [row, col]
+            color_candidate = img_shape_color_list[self.pair_idx].color
+        self.size_candidate = getattr(self.config.environment, 'size_candidate', size_candidate)
+        self.color_candidate = getattr(self.config.environment, 'color_candidate', color_candidate)
         
         # Create vectorized environment
         self.envs = gym.vector.SyncVectorEnv([
             make_env(
-                fixed_task=self.fixed_task,
-                fixed_pair_idx=self.fixed_pair_idx,
-                task_id=self.task_id,
-                pair_idx=self.pair_idx,
                 training_challenges=training_challenges,
                 training_solutions=training_solutions,
                 evaluation_challenges=evaluation_challenges,
@@ -461,8 +432,8 @@ class ArcAgiVectorizedTrainer:
                     # Episode ended - log stats
                     self.episode_returns.append(self.current_episode_returns[i])
                     self.episode_lengths.append(self.current_episode_lengths[i])
-                    self.success_rate.append(1.0 if self.current_episode_returns[i] > 10.0 else 0.0)
-                    
+                    is_success = infos['is_success'][i]
+                    self.success_rate.append(1.0 if is_success else 0.0)
                     # Reset tracking for this environment
                     self.current_episode_returns[i] = 0.0
                     self.current_episode_lengths[i] = 0
@@ -589,11 +560,14 @@ class ArcAgiVectorizedTrainer:
         best_mean_reward = -float('inf')
         first_vis = True
         
-        reset_options = {
-            'size_candidate': self.size_candidate,
-            'color_candidate': self.color_candidate
-        }
-        next_obs, infos = self.envs.reset(seed=self.seed, options=reset_options)
+        options = {'mode': 'train',
+                'task_id': self.task_id,
+                'pair_idx': self.pair_idx,
+                'rand_init': self.rand_init,
+                'ratio_fill_correct': self.ratio_fill_correct,
+                'ratio_fill_incorrect': self.ratio_fill_incorrect,
+                }
+        next_obs, infos = self.envs.reset(seed=self.seed, options=options)
         next_obs = torch.Tensor(next_obs).to(self.device)
         next_done = torch.zeros(self.num_envs).to(self.device)
         
@@ -731,7 +705,7 @@ class ArcAgiVectorizedTrainer:
         self.envs.close()
 
 
-@hydra.main(version_base=None, config_path="config", config_name="ppo_vector_env")
+@hydra.main(version_base=None, config_path="config", config_name="ppo_arc_agi_base")
 def main(cfg: DictConfig) -> None:
     """Main training function with Hydra configuration."""
     print("Vectorized PPO Training configuration:")
