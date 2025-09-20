@@ -79,14 +79,12 @@ pair_idx = 0
 #         'pair_idx': pair_idx,
 #         'rand_init': True,
 #         'ratio_fill_correct': 0.5,
-#         'ratio_fill_incorrect': 0.0,
 #         }
 options = {'mode': 'train',
         'task_id': task_id,
         'pair_idx': pair_idx,
         'rand_init': True,
         'ratio_fill_correct': 0.5,
-        'ratio_fill_incorrect': 0.5,
         }
 # %%
 obs, info = env.reset(seed=42,
@@ -147,7 +145,6 @@ options = {'mode': 'train',
         'pair_idx': None,
         'rand_init': True,
         'ratio_fill_correct': 0.5,
-        'ratio_fill_incorrect': 0.5,
         }
 # %%
 obs, info = envs.reset(seed=42, options=options)
@@ -168,5 +165,6 @@ envs.envs[3].plot_current_grid()
 # %%
 envs.envs[3].plot_target_grid()
 # %%
-print(infoinfos)
+print(info.keys())
 # %%
+info['is_success']

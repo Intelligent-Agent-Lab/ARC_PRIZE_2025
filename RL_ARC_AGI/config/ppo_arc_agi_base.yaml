@@ -13,7 +13,6 @@ environment:
   seed: 37
   rand_init: false
   ratio_fill_correct: 0.0
-  ratio_fill_incorrect: 0.0
   
   # Vectorized environment specific settings
   num_envs: 4  # Number of parallel environments

@@ -326,7 +326,6 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
             "color_candidate": self.color_candidate,
             "is_success": self.is_success,
             "ratio_fill_correct": self.ratio_fill_correct,
-            "ratio_fill_incorrect": self.ratio_fill_incorrect,
         }
 
     def reset(self,
@@ -404,7 +403,6 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         # Get rand_init option
         self.rand_init: bool = options.get('rand_init', False) if options else False
         self.ratio_fill_correct: float = options.get('ratio_fill_correct', 0.0) if options else 0.0
-        self.ratio_fill_incorrect: float = options.get('ratio_fill_incorrect', 0.0) if options else 0.0
         
         # target grid에서 test solution에 해당하는 부분을 전부 pad_val으로 masking하고 current grid로 할당
         self._chosen_grid_img = np.zeros([30, 30]).astype(int)
@@ -416,38 +414,23 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
             height, width = self.size_candidate[0], self.size_candidate[1]
             total_cells = height * width
 
-            assert (self.ratio_fill_correct + self.ratio_fill_incorrect) <= 1.0
+            assert self.ratio_fill_correct < 1.0
 
-            if self.ratio_fill_correct > 0.0 or self.ratio_fill_incorrect > 0.0:
+            if self.ratio_fill_correct > 0.0:
                 # Randomly initialize some cells in size_candidate area with correct answers or incorrect answers
                 target_solution = self._target_grid_img[0:height, 150:150+width]
                 current_solution = np.full((height, width), empty_val)  # Start with empty
-                
-                # 랜덤 값 채우기
-                if self.ratio_fill_incorrect > 0.0:
-                    incorrect_num_filled = int(total_cells * self.ratio_fill_incorrect)
-                    incorrect_positions = [(i, j) for i in range(height) for j in range(width)]
-                    incorrect_filled_positions = np.random.choice(len(incorrect_positions), incorrect_num_filled, replace=False)
-                    for pos_idx in incorrect_filled_positions:
-                        i, j = incorrect_positions[pos_idx]
-                        random_color = np.random.randint(low=0, high=9)
-                        if random_color == target_solution[i, j]:
-                            # 정답으로 채워진 경우, 이미 선택한 것으로 간주함
-                            self._chosen_grid_img[i, j] +=1
-                        current_solution[i, j] = random_color
-                
+
                 # 정답 값 채우기
-                if self.ratio_fill_correct > 0.0:
-                    num_filled = int(total_cells * self.ratio_fill_correct)
-                    positions = [(i, j) for i in range(height) for j in range(width)]
-                    filled_positions = np.random.choice(len(positions), num_filled, replace=False)
-                    for pos_idx in filled_positions:
-                        i, j = positions[pos_idx]
-                        current_solution[i, j] = target_solution[i, j]
-                        # 정답으로 채워진 경우, 이미 선택한 것으로 간주함
-                        self._chosen_grid_img[i, j] +=1
+                num_filled = int(total_cells * self.ratio_fill_correct)
+                positions = [(i, j) for i in range(height) for j in range(width)]
+                filled_positions = np.random.choice(len(positions), num_filled, replace=False)
+                for pos_idx in filled_positions:
+                    i, j = positions[pos_idx]
+                    current_solution[i, j] = target_solution[i, j]
+                    # 정답으로 채워진 경우, 이미 선택한 것으로 간주함
+                    self._chosen_grid_img[i, j] +=1
                 self._current_grid_img[0:height, 150:150+width] = current_solution
-                
 
         else: # self.rand_init == False
             # Fill only the size_candidate area with empty_val (11)
@@ -500,7 +483,7 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
             terminated = True
             reward = -1
         # 선택한 위치에 틀린 색을 선택한 경우 실패
-        elif color != target_color_img:
+        elif color != target_color_img or current_cell_value != 11:
             terminated = True
             reward = -1
         else:

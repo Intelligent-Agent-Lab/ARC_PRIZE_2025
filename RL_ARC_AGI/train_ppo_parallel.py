@@ -565,7 +565,6 @@ class ArcAgiVectorizedTrainer:
                 'pair_idx': self.pair_idx,
                 'rand_init': self.rand_init,
                 'ratio_fill_correct': self.ratio_fill_correct,
-                'ratio_fill_incorrect': self.ratio_fill_incorrect,
                 }
         next_obs, infos = self.envs.reset(seed=self.seed, options=options)
         next_obs = torch.Tensor(next_obs).to(self.device)
