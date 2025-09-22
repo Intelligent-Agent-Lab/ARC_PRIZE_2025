@@ -38,7 +38,6 @@ train_task_img_dict, _, train_img_shape_colors, _ = preprocess_data(training_cha
 eval_task_img_dict, _, eval_img_shape_colors, _= preprocess_data(evaluation_challenges, evaluation_solutions)
 # task_id = '3cd86f4f'
 # pair_idx = 1
-# img_shape_color_list = train_img_shape_colors[task_id]
 # print(img_shape_color_list[pair_idx])
 # row = img_shape_color_list[pair_idx].row
 # col = img_shape_color_list[pair_idx].col
@@ -57,26 +56,32 @@ env = make_env(training_challenges=training_challenges,
                 train_task_img_dict=train_task_img_dict,
                 eval_task_img_dict=eval_task_img_dict,
             )()
-
+# %%
+task_ids = list(train_task_img_dict.keys())[:10]
+task_ids
 # %%
 minari.list_local_datasets()
 
 # %%
 # dataset_id = f"arc_agi/arc_agi_1000-v0"
 dataset_id = f"arc_agi/arc_agi_101-v0"
-dataset = minari.load_dataset(dataset_id, download=False)
-
 # %%
-batch_size = 128
-replay_buffer = MinariExperienceReplay(
-    dataset_id,
-    download=False,
-    load_from_local_minari=True,
-    split_trajs=False,
-    batch_size=batch_size,
-    sampler=SamplerWithoutReplacement(),
-    transform=DoubleToFloat(),
-)
+buffer_dict = dict()
+for task_id in task_ids:
+    dataset_id = f"arc_agi/arc_agi_{task_id}-v0"
+    dataset = minari.load_dataset(dataset_id, download=False)
+    batch_size = 32
+    replay_buffer = MinariExperienceReplay(
+        dataset_id,
+        download=False,
+        load_from_local_minari=True,
+        split_trajs=False,
+        batch_size=batch_size,
+        sampler=SamplerWithoutReplacement(),
+        transform=DoubleToFloat(),
+    )
+    buffer_dict[task_id] = replay_buffer
+
 # %%
 seed = 42
 torch.manual_seed(seed)
@@ -98,12 +103,43 @@ from torchrl.trainers.helpers.models import ACTIVATIONS
 from torchrl.data.tensor_specs import OneHot
 from torch.nn.functional import one_hot
 # %%
-from network.vit import ViTPolicy, ViTQValue, ViTValue
+# from network.vit import ViTPolicy, ViTQValue, ViTValue
+
+# n_act, n_obs = 9000, (30, 180)
+# spec = OneHot(n_act)
+# vit_policy = ViTPolicy(embed_dim=512, patch_size=15,
+#                  num_heads=8, num_layers=12, action_size=9000,)
+# actor_module = SafeModule(vit_policy, in_keys=["observation"], out_keys=["logits"])
+# actor = ProbabilisticActor(
+#             module=actor_module,
+#             in_keys=["logits"],
+#             out_keys=["action"],
+#             spec=spec,
+#             distribution_class=OneHotCategorical,
+#             default_interaction_type=ExplorationType.DETERMINISTIC,
+#             ).to(device)
+# vit_q_value = ViTQValue(embed_dim=512, patch_size=15,
+#                  num_heads=8, num_layers=12, action_size=9000)
+# q_value_net = SafeModule(
+#             vit_q_value,
+#             in_keys=["observation"],
+#             out_keys=["state_action_value"],
+#             ).to(device)
+# vit_value = ViTValue(embed_dim=512, patch_size=15,
+#                  num_heads=8, num_layers=12, action_size=9000)
+# value_net = SafeModule(
+#             vit_value,
+#             in_keys=["observation"],
+#             out_keys=["state_value"],
+#             ).to(device)
+
+# %%
+from network.cnn import CNNPolicy, CNNQValue, CNNValue
+
 n_act, n_obs = 9000, (30, 180)
 spec = OneHot(n_act)
-vit_policy = ViTPolicy(embed_dim=512, patch_size=15,
-                 num_heads=8, num_layers=12, action_size=9000,)
-actor_module = SafeModule(vit_policy, in_keys=["observation"], out_keys=["logits"])
+cnn_policy = CNNPolicy(input_channels=1, hidden_dim=128, action_size=9000, dropout=0.1,)
+actor_module = SafeModule(cnn_policy, in_keys=["observation"], out_keys=["logits"])
 actor = ProbabilisticActor(
             module=actor_module,
             in_keys=["logits"],
@@ -112,20 +148,19 @@ actor = ProbabilisticActor(
             distribution_class=OneHotCategorical,
             default_interaction_type=ExplorationType.DETERMINISTIC,
             ).to(device)
-vit_q_value = ViTQValue(embed_dim=512, patch_size=15,
-                 num_heads=8, num_layers=12, action_size=9000)
+cnn_q_value = CNNQValue(input_channels=1, hidden_dim=128, action_size=9000, dropout=0.1)
 q_value_net = SafeModule(
-            vit_q_value,
+            cnn_q_value,
             in_keys=["observation"],
             out_keys=["state_action_value"],
             ).to(device)
-vit_value = ViTValue(embed_dim=512, patch_size=15,
-                 num_heads=8, num_layers=12, action_size=9000)
+cnn_value = CNNValue(input_channels=1, hidden_dim=128, dropout=0.1)
 value_net = SafeModule(
-            vit_value,
+            cnn_value,
             in_keys=["observation"],
             out_keys=["state_value"],
             ).to(device)
+
 
 # %%
 loss_module = DiscreteIQLLoss(actor, q_value_net, value_net,
@@ -194,6 +229,7 @@ def evaluate(iteration, env, policy, task_ids, visualize=False):
     policy.eval()
     for task_id in task_ids:
         pair_indices = list(range(len(train_task_img_dict[task_id])))
+        img_shape_color_list = train_img_shape_colors[task_id]
         for pair_idx in pair_indices:
             options = {'mode': 'train',
                     'task_id': task_id,
@@ -241,27 +277,34 @@ def evaluate(iteration, env, policy, task_ids, visualize=False):
     return num_sucess, episode_returns
 # %%
 from tqdm.auto import tqdm
-iterations = 10_000  # Set to 50_000 to reproduce the results below
-eval_interval = 30
+iterations = 50000  # Set to 50_000 to reproduce the results below
+eval_interval = 100
 num_eval_episodes = 1
-loss_logs = []
+total_loss_logs = []
+task_loss_logs_dict = dict()
+for task_id in task_ids:
+    task_loss_logs_dict[task_id] = []
 eval_reward_logs = []
 pbar = tqdm(range(iterations))
 max_num_success = -1
 # for i in pbar:
 for i in range(iterations):
     # 1) Sample data from the dataset
-    data = replay_buffer.sample().cuda()
-    data['action'] = one_hot(data['action'], num_classes=9000)
-
-    # 2) Compute loss l = L_V + L_Q + L_pi
-    loss_dict = loss_module(data.to(device))
-    loss = loss_dict["loss_value"] + loss_dict["loss_qvalue"] + loss_dict["loss_actor"]
-    loss_logs.append(loss.item())
-
+    total_loss = 0
+    for task_id in task_ids:
+        replay_buffer = buffer_dict[task_id]
+        data = replay_buffer.sample().cuda()
+        # print(data['observation'].shape)
+        data['action'] = one_hot(data['action'], num_classes=9000)
+        # 2) Compute loss l = L_V + L_Q + L_pi
+        loss_dict = loss_module(data.to(device))
+        loss = loss_dict["loss_value"] + loss_dict["loss_qvalue"] + loss_dict["loss_actor"]
+        task_loss_logs_dict[task_id].append(loss)
+        total_loss += loss
+    total_loss_logs.append(total_loss.item())
     # 3) Backpropagate the gradients
     optimizer.zero_grad()
-    loss.backward()
+    total_loss.backward()
     optimizer.step()  # Update V(s), Q(a, s), pi(a|s)
     target_net_updater.step()  # Update the target Q-network
 
@@ -269,23 +312,24 @@ for i in range(iterations):
     if i % eval_interval == 0:
         num_success, episode_returns = evaluate(i, env, actor, task_ids, visualize=True)
         pbar.set_description(
-            f"Loss: {loss_logs[-1]:.1f}, Num Sucess: {num_success} Avg return: {np.mean(episode_returns):.2f}"
+            f"Loss: {total_loss_logs[-1]:.1f}, Num Sucess: {num_success} Avg return: {np.mean(episode_returns):.2f}"
         )
         eval_reward_logs.append(np.mean(episode_returns))
-        print(f"Epoch {i}: Loss: {loss_logs[-1]:.1f}, Num Sucess: {num_success} Avg return: {np.mean(episode_returns):.2f}")
+        print(f"Epoch {i}: Loss: {total_loss_logs[-1]:.1f}, Num Sucess: {num_success} Avg return: {np.mean(episode_returns):.2f}")
     
     # if num_success > max_num_success:
     #     num_success, episode_returns = evaluate(i, env, actor, task_ids, visualize=True)
     #     max_num_success = num_success
-    print(f"Epoch {i}: Loss: {loss_logs[-1]:.4f}")
+    print(f"Epoch {i}: Loss: {total_loss_logs[-1]:.4f}")
     
 pbar.close()
 
 # %%
 fig, axes = plt.subplots(nrows=1, ncols=2, figsize=(7, 3))
-axes[0].plot(loss_logs)
+axes[0].plot(total_loss_logs)
 axes[0].set_title("Loss")
 axes[0].set_xlabel("iterations")
+axes[0].set_ylim(0, 500)
 axes[1].plot(eval_reward_logs)
 axes[1].set_title("Cumulative reward")
 axes[1].set_xlabel("iterations")
@@ -295,3 +339,4 @@ plt.show()
 num_success, episode_returns = evaluate(i, env, actor, pair_indices)
 
 # %%
+print(loss)
