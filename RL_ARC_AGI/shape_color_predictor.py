@@ -1,3 +1,6 @@
+# 이 스크립트는 ARC 과제의 훈련 예제를 분석하여, 테스트 문제의 출력 형태(shape)와 색상 팔레트를 예측하는 규칙 기반 엔진입니다.
+# 훈련 예제들에서 일관된 변환 규칙을 찾아내고, 이를 테스트 입력에 적용하여 결과를 추론합니다.
+
 import json
 from pathlib import Path
 from collections import Counter
@@ -5,42 +8,41 @@ from dataclasses import dataclass
 from typing import Tuple, List
 import numpy as np
 
-# --- 내부 객체 탐지 ---
+# --- 내부 객체 탐지 헬퍼 함수 ---
 
 def _get_bounding_box(mask: np.ndarray) -> Tuple[int, int, int, int]:
-    """Calculates the bounding box of a boolean mask."""
-    rs, cs = np.where(mask)
-    if rs.size == 0:
-        return (0, 0, -1, -1)  # Return invalid box if mask is empty
-    return (int(rs.min()), int(cs.min()), int(rs.max()), int(cs.max()))
+    """마스크 바운딩 박스."""
+    rows, cols = np.where(mask)
+    if rows.size == 0:
+        return (0, 0, -1, -1)  # 마스크가 비어있으면 유효하지 않은 박스 반환
+    return (int(rows.min()), int(cols.min()), int(rows.max()), int(cols.max()))
 
 def _find_components_by_color(grid: np.ndarray, color: int) -> List[np.ndarray]:
-    """Finds all connected components for a single color, returning a list of boolean masks."""
-    H, W = grid.shape
-    visited = np.zeros((H, W), dtype=bool)
+    """단일 색상에 대한 모든 연결된 구성 요소를 찾기"""
+    height, width = grid.shape
+    visited = np.zeros((height, width), dtype=bool)
     masks = []
-    # Use 4-way connectivity for neighbors
-    nbrs = [(1, 0), (-1, 0), (0, 1), (0, -1)]
-    for r in range(H):
-        for c in range(W):
-            if visited[r, c] or grid[r, c] != color:
+    # 4방향 연결성을 사용하여 이웃을 정의 (상,하,좌,우)
+    neighbor_offsets = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+    for start_row in range(height):
+        for start_col in range(width):
+            if visited[start_row, start_col] or grid[start_row, start_col] != color:
                 continue
             
-            # Start BFS to find a new component
-            q = [(r, c)]
-            visited[r, c] = True
-            component_points = [(r, c)]
-            while q:
-                rr, cc = q.pop(0) # BFS queue
-                for dr, dc in nbrs:
-                    nr, nc = rr + dr, cc + dc
-                    if 0 <= nr < H and 0 <= nc < W and not visited[nr, nc] and grid[nr, nc] == color:
-                        visited[nr, nc] = True
-                        q.append((nr, nc))
-                        component_points.append((nr, nc))
+            # 새로운 구성 요소를 찾기 위해 BFS 시작
+            queue = [(start_row, start_col)]
+            visited[start_row, start_col] = True
+            component_points = [(start_row, start_col)]
+            while queue:
+                current_row, current_col = queue.pop(0)
+                for delta_row, delta_col in neighbor_offsets:
+                    next_row, next_col = current_row + delta_row, current_col + delta_col
+                    if 0 <= next_row < height and 0 <= next_col < width and not visited[next_row, next_col] and grid[next_row, next_col] == color:
+                        visited[next_row, next_col] = True
+                        queue.append((next_row, next_col))
+                        component_points.append((next_row, next_col))
             
-            # Create a boolean mask for the found component
-            mask = np.zeros((H, W), dtype=bool)
+            mask = np.zeros((height, width), dtype=bool)
             rows = [p[0] for p in component_points]
             cols = [p[1] for p in component_points]
             mask[rows, cols] = True
@@ -57,41 +59,41 @@ class Shape:
         return f"({self.height}, {self.width})"
 
 def find_objects(grid):
-    """
-    Finds all connected objects in a grid, sorted by size in descending order.
-    """
+    """그리드 내의 모든 연결된 객체를 찾아 크기 순으로 정렬하여 반환"""
     grid = np.array(grid)
     objects = []
-    unique_colors = [int(c) for c in np.unique(grid) if c != 0]
+    unique_colors = [int(c) for c in np.unique(grid) if c != 0] # 배경색(0) 제외
 
     for color in unique_colors:
         masks = _find_components_by_color(grid, color)
         for mask in masks:
-            rs, cs = np.where(mask)
-            if rs.size > 0:
+            rows, cols = np.where(mask)
+            if rows.size > 0:
                 objects.append({
                     "color": color,
                     "points": [],
-                    "size": len(rs),
+                    "size": len(rows),
                     "bbox": _get_bounding_box(mask)
                 })
     return sorted(objects, key=lambda x: x["size"], reverse=True)
 
-# --- 그리드 변환 ---
+# --- 변환 규칙 ---
 
-def _get_inner_objects(t):
-    """Returns a list of objects that do not touch the grid border."""
-    objects = find_objects(t['input'])
+def _get_inner_objects(train_example):
+    """그리드 경계에 닿지 않는 객체들의 리스트를 반환"""
+    objects = find_objects(train_example['input'])
     if not objects: return []
-    grid_h, grid_w = t['input_shape'].height, t['input_shape'].width
+    grid_h, grid_w = train_example['input_shape'].height, train_example['input_shape'].width
     return [o for o in objects if o['bbox'][0] > 0 and o['bbox'][1] > 0 and o['bbox'][2] < grid_h - 1 and o['bbox'][3] < grid_w - 1]
 
-# --- Shape Transformations (Leak-Free) ---
-def id_transform(t): return Shape(height=t['input_shape'].height, width=t['input_shape'].width)
-def transpose_transform(t): return Shape(height=t['input_shape'].width, width=t['input_shape'].height)
+# --- 모양(Shape) 변환 ---
+# 각 함수는 예시를 받아 예측된 모양을 반환하는 규칙들
 
-def crop_to_all_inner_objects_bbox(t):
-    inner_objects = _get_inner_objects(t)
+def id_transform(train_example): return Shape(height=train_example['input_shape'].height, width=train_example['input_shape'].width)
+def transpose_transform(train_example): return Shape(height=train_example['input_shape'].width, width=train_example['input_shape'].height)
+
+def crop_to_all_inner_objects_bbox(train_example):
+    inner_objects = _get_inner_objects(train_example)
     if not inner_objects: return None
     min_r = min(o['bbox'][0] for o in inner_objects)
     min_c = min(o['bbox'][1] for o in inner_objects)
@@ -99,26 +101,25 @@ def crop_to_all_inner_objects_bbox(t):
     max_c = max(o['bbox'][3] for o in inner_objects)
     return Shape(height=max_r - min_r + 1, width=max_c - min_c + 1)
 
-def crop_to_largest_non_boundary_object_bbox(t):
-    objects = find_objects(t['input'])
+def crop_to_largest_non_boundary_object_bbox(train_example):
+    objects = find_objects(train_example['input'])
     if not objects: return None
-    grid_h, grid_w = t['input_shape'].height, t['input_shape'].width
+    grid_h, grid_w = train_example['input_shape'].height, train_example['input_shape'].width
     non_boundary_objects = [o for o in objects if not (o['bbox'][0] == 0 or o['bbox'][1] == 0 or o['bbox'][2] == grid_h - 1 or o['bbox'][3] == grid_w - 1)]
     if not non_boundary_objects: return None
     lrg_obj = max(non_boundary_objects, key=lambda x: x['size'])
     min_r, min_c, max_r, max_c = lrg_obj['bbox']
     return Shape(height=max_r - min_r + 1, width=max_c - min_c + 1)
 
-def crop_to_object_bbox(t):
-    objects = find_objects(t['input'])
+def crop_to_object_bbox(train_example):
+    objects = find_objects(train_example['input'])
     if not objects: return None
     min_r, min_c, max_r, max_c = objects[0]['bbox']
     return Shape(height=max_r - min_r + 1, width=max_c - min_c + 1)
 
 def _create_shape_from_object_count_rule(shape_template):
-    """Factory to create shape prediction rules based on object count."""
-    def rule(t):
-        n = len(find_objects(t['input']))
+    def rule(train_example):
+        n = len(find_objects(train_example['input']))
         if n == 0:
             return None
         height = n if shape_template[0] == 'n' else shape_template[0]
@@ -130,45 +131,46 @@ shape_from_object_count_nxn = _create_shape_from_object_count_rule(('n', 'n'))
 shape_from_object_count_1xn = _create_shape_from_object_count_rule((1, 'n'))
 shape_from_object_count_nx1 = _create_shape_from_object_count_rule(('n', 1))
 
-# --- 색상 규칙 ---
-def color_id_transform(t): return set(np.array(t['input']).flatten())
+# --- 색상 변환 규칙 ---
 
-def color_of_inner_objects(t):
-    inner_objects = _get_inner_objects(t)
+def color_id_transform(train_example): return set(np.array(train_example['input']).flatten())
+
+def color_of_inner_objects(train_example):
+    inner_objects = _get_inner_objects(train_example)
     if not inner_objects: return None
     inner_colors = {o['color'] for o in inner_objects}
-    inner_colors.add(0)
+    inner_colors.add(0) # 배경색은 항상 포함
     return inner_colors
 
-def color_of_largest_object(t):
-    objects = find_objects(t['input'])
+def color_of_largest_object(train_example):
+    objects = find_objects(train_example['input'])
     return {objects[0]['color'], 0} if objects else {0}
 
-def color_palette_subtraction(t):
-    input_colors = Counter(np.array(t['input']).flatten())
+def color_palette_subtraction(train_example):
+    input_colors = Counter(np.array(train_example['input']).flatten())
     if 0 in input_colors: del input_colors[0]
-    if not input_colors: return set(np.array(t['input']).flatten())
-    most_common_color = input_colors.most_common(1)[0][0]
-    return {c for c in np.array(t['input']).flatten() if c != most_common_color}
+    if not input_colors: return set(np.array(train_example['input']).flatten())
+    most_common_color = input_colors.most_common(1)[0][0] # 배경색 (진짜 가장 흔한것) 제외
+    return {c for c in np.array(train_example['input']).flatten() if c != most_common_color}
 
-# --- Prediction Logic ---
-# 간단한 것 부터 복잡한 것 순으로 대조
+# --- 예측 로직 ---
+
 def _prepare_train_tasks(task):
     train_tasks = []
-    for ex in task.get('train', []):
-        if 'input' not in ex or 'output' not in ex or not ex['input'] or not ex['input'][0] or not ex['output'] or not ex['output'][0]:
+    for example in task.get('train', []):
+        if 'input' not in example or 'output' not in example or not example['input'] or not example['input'][0] or not example['output'] or not example['output'][0]:
             continue
         train_tasks.append({
-            "input": ex['input'], "output": ex['output'],
-            "input_shape": Shape(len(ex['input']), len(ex['input'][0])),
-            "output_shape": Shape(len(ex['output']), len(ex['output'][0]))
+            "input": example['input'], "output": example['output'],
+            "input_shape": Shape(len(example['input']), len(example['input'][0])),
+            "output_shape": Shape(len(example['output']), len(example['output'][0]))
         })
     return train_tasks
 
 def predict_shape(train_tasks):
+    """모양 예측: 미리 정의된 규칙들을 우선순위에 따라 검사하고, 모든 훈련 예제를 통과하는 첫 번째 규칙을 채택"""
     if not train_tasks: return "fallback_id", id_transform
 
-    # --- Simple Rules ---
     simple_rules = [
         ("id_transform", id_transform, False),
         ("transpose_transform", transpose_transform, False),
@@ -182,50 +184,52 @@ def predict_shape(train_tasks):
     for name, rule_func, check_none in simple_rules:
         try:
             if check_none:
-                if all(rule_func(t) is not None and rule_func(t) == t['output_shape'] for t in train_tasks):
+                if all(rule_func(train_example) is not None and rule_func(train_example) == train_example['output_shape'] for train_example in train_tasks):
                     return name, rule_func
             else:
-                if all(rule_func(t) == t['output_shape'] for t in train_tasks):
+                if all(rule_func(train_example) == train_example['output_shape'] for train_example in train_tasks):
                     return name, rule_func
         except (AttributeError, TypeError, IndexError):
             continue
 
-    # --- Complex Rules (Delta-based) ---
-    deltas = {(t['output_shape'].height - t['input_shape'].height, t['output_shape'].width - t['input_shape'].width) for t in train_tasks}
+    # 입력/출력 모양의 높이/너비 차이가 일정한지 확인
+    deltas = {(train_example['output_shape'].height - train_example['input_shape'].height, train_example['output_shape'].width - train_example['input_shape'].width) for train_example in train_tasks}
     if len(deltas) == 1:
-        dh, dw = deltas.pop()
-        predictor = lambda t, h=dh, w=dw: Shape(t['input_shape'].height + h, t['input_shape'].width + w)
-        return ("crop_transform" if dh < 0 or dw < 0 else "pad_transform"), predictor
+        delta_height, delta_width = deltas.pop()
+        predictor = lambda t, h=delta_height, w=delta_width: Shape(t['input_shape'].height + h, t['input_shape'].width + w)
+        return ("crop_transform" if delta_height < 0 or delta_width < 0 else "pad_transform"), predictor
 
-    # --- Tiling Rule ---
+    # 입력 모양을 일정하게 타일링하는지 확인
     factors = set()
     is_tileable = True
-    for t in train_tasks:
-        if t['input_shape'].height > 0 and t['input_shape'].width > 0 and \
-           t['output_shape'].height % t['input_shape'].height == 0 and \
-           t['output_shape'].width % t['input_shape'].width == 0:
-            factors.add((t['output_shape'].height // t['input_shape'].height, t['output_shape'].width // t['input_shape'].width))
+    for train_example in train_tasks:
+        if train_example['input_shape'].height > 0 and train_example['input_shape'].width > 0 and \
+           train_example['output_shape'].height % train_example['input_shape'].height == 0 and \
+           train_example['output_shape'].width % train_example['input_shape'].width == 0:
+            factors.add((train_example['output_shape'].height // train_example['input_shape'].height, train_example['output_shape'].width // train_example['input_shape'].width))
         else:
             is_tileable = False
             break
     if is_tileable and len(factors) == 1:
-        fh, fw = factors.pop()
-        if fh > 0 and fw > 0:
-            return "tile_transform", lambda t, h=fh, w=fw: Shape(t['input_shape'].height * h, t['input_shape'].width * w)
+        factor_height, factor_width = factors.pop()
+        if factor_height > 0 and factor_width > 0:
+            return "tile_transform", lambda t, h=factor_height, w=factor_width: Shape(t['input_shape'].height * h, t['input_shape'].width * w)
 
-    # --- Fallbacks ---
-    output_shapes = [t['output_shape'] for t in train_tasks]
+    # 실패 1: 모든 출력 모양이 같다면 그 모양을 예측값으로 사용
+    output_shapes = [train_example['output_shape'] for train_example in train_tasks]
     most_common_shape = Counter(output_shapes).most_common(1)[0][0]
-    if all(t['output_shape'] == most_common_shape for t in train_tasks):
+    if all(train_example['output_shape'] == most_common_shape for train_example in train_tasks):
         return "constant_shape", lambda t, shape=most_common_shape: shape
 
+    # 실패 2: 위 모든 규칙 실패 시, 첫 번째 훈련 예제의 출력 모양을 사용
     first_output_shape = train_tasks[0]['output_shape']
     return "fallback_first_train_shape", lambda t, shape=first_output_shape: shape
 
 def predict_color_palette(train_tasks):
+    """색상 예측: 모양 예측과 유사하게, 우선순위에 따라 색상 변환 규칙을 검사하고 가장 먼저 일치하는 규칙을 사용"""
     if not train_tasks: return "color_union_transform", lambda t: set()
 
-    # --- Simple Rules ---
+    # 간단한 규칙부터 우선적으로 확인
     rules = [
         ("color_id_transform", color_id_transform, False),
         ("color_of_inner_objects", color_of_inner_objects, True),
@@ -234,19 +238,19 @@ def predict_color_palette(train_tasks):
     ]
     for name, rule_func, check_none in rules:
         try:
-            if all((res := rule_func(t)) is not None and res == set(np.array(t['output']).flatten()) for t in train_tasks) if check_none \
-            else all(rule_func(t) == set(np.array(t['output']).flatten()) for t in train_tasks):
+            if all((result := rule_func(train_example)) is not None and result == set(np.array(train_example['output']).flatten()) for train_example in train_tasks) if check_none \
+            else all(rule_func(train_example) == set(np.array(train_example['output']).flatten()) for train_example in train_tasks):
                 return name, rule_func
         except (AttributeError, TypeError, IndexError):
             continue
 
-    # --- Constant Color Rule ---
+    # 실패 규칙 1: 모든 출력 색상이 같다면 그 색상 팔레트를 예측값으로 사용
     first_output_colors = set(np.array(train_tasks[0]['output']).flatten())
-    if all(set(np.array(t['output']).flatten()) == first_output_colors for t in train_tasks[1:]):
+    if all(set(np.array(train_example['output']).flatten()) == first_output_colors for train_example in train_tasks[1:]):
         return "color_constant_transform", lambda t, colors=first_output_colors: colors
 
-    # --- Fallback ---
-    all_output_colors = set.union(*[set(np.array(t['output']).flatten()) for t in train_tasks])
+    # 실패 규칙 2: 위 모든 규칙 실패 시, 모든 훈련 예제의 출력 색상을 합쳐서 사용
+    all_output_colors = set.union(*[set(np.array(train_example['output']).flatten()) for train_example in train_tasks])
     return "color_union_transform", lambda t, colors=all_output_colors: colors
 
 def predict_candidates_from_task_id(task_id, training_challenges):
@@ -256,9 +260,11 @@ def predict_candidates_from_task_id(task_id, training_challenges):
     train_tasks = _prepare_train_tasks(task)
     if not train_tasks: return ([10, 10], list(range(10)))
 
+    # 모양과 색상에 대한 최적의 규칙을 각각 찾음
     _, shape_rule_func = predict_shape(train_tasks)
     _, color_rule_func = predict_color_palette(train_tasks)
 
+    # 찾은 규칙을 테스트 입력에 적용하여 최종 후보를 예측
     test_inputs = task.get('test', [])
     test_input_grid = test_inputs[0]['input'] if test_inputs and test_inputs[0].get('input') else train_tasks[0]['input']
     
@@ -269,7 +275,7 @@ def predict_candidates_from_task_id(task_id, training_challenges):
     predicted_shape = shape_rule_func(leak_free_test_instance)
     predicted_palette = color_rule_func(leak_free_test_instance)
 
-    # Format results with fallbacks
+    # 결과를 포맷팅하고, 예측 실패 시 대체(fallback) 값을 사용
     if predicted_shape is None:
         predicted_shape = train_tasks[0]['output_shape']
     size_candidate = [predicted_shape.height, predicted_shape.width]
@@ -281,20 +287,23 @@ def predict_candidates_from_task_id(task_id, training_challenges):
     if not color_candidate:
         color_candidate = sorted({int(c) for c in np.array(train_tasks[0]['output']).flatten() if 0 <= c <= 9})
 
+    # 최종 후보값이 비어있지 않도록 보장
     if not size_candidate or len(size_candidate) != 2: size_candidate = [10, 10]
     if not color_candidate: color_candidate = list(range(10))
 
     return size_candidate, color_candidate
 
-# --- Analysis & Main Execution (Commented Out) ---
+# --- 분석 및 메인 실행 ---
+# 이 섹션은 스크립트를 직접 실행할 때만 사용되며, 예측기의 성능을 분석하는 용도입니다.
+# 강화학습 환경에서는 호출 X
 #
 # def _print_task_analysis(task_id, train_tasks, results):
 #     print(f"--- 평가 중: 태스크 ID: {task_id} ---")
 #     print("[Train Data]")
-#     for i, t in enumerate(train_tasks):
-#         in_colors = sorted(list({int(c) for c in np.array(t['input']).flatten()}))
-#         out_colors = sorted(list({int(c) for c in np.array(t['output']).flatten()}))
-#         print(f"- 예제 {i+1}: Shape: {t['input_shape']} -> {t['output_shape']} | Colors: {in_colors} -> {out_colors}")
+#     for i, train_example in enumerate(train_tasks):
+#         in_colors = sorted(list({int(c) for c in np.array(train_example['input']).flatten()}))
+#         out_colors = sorted(list({int(c) for c in np.array(train_example['output']).flatten()}))
+#         print(f"- 예제 {i+1}: Shape: {train_example['input_shape']} -> {train_example['output_shape']} | Colors: {in_colors} -> {out_colors}")
 #     
 #     print("\n[Prediction Result]")
 #     shape_status = "성공!" if results['shape_correct'] else "실패!"
