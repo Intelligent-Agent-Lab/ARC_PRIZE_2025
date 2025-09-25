@@ -293,76 +293,65 @@ def predict_candidates_from_task_id(task_id, training_challenges):
 
     return size_candidate, color_candidate
 
-# --- 분석 및 메인 실행 ---
-# 이 섹션은 스크립트를 직접 실행할 때만 사용되며, 예측기의 성능을 분석하는 용도입니다.
-# 강화학습 환경에서는 호출 X
-#
-# def _print_task_analysis(task_id, train_tasks, results):
-#     print(f"--- 평가 중: 태스크 ID: {task_id} ---")
-#     print("[Train Data]")
-#     for i, train_example in enumerate(train_tasks):
-#         in_colors = sorted(list({int(c) for c in np.array(train_example['input']).flatten()}))
-#         out_colors = sorted(list({int(c) for c in np.array(train_example['output']).flatten()}))
-#         print(f"- 예제 {i+1}: Shape: {train_example['input_shape']} -> {train_example['output_shape']} | Colors: {in_colors} -> {out_colors}")
-#     
-#     print("\n[Prediction Result]")
-#     shape_status = "성공!" if results['shape_correct'] else "실패!"
-#     color_status = "성공!" if results['color_correct'] else "실패!"
-#     
-#     print(f"Shape: {shape_status} | 규칙: {results['shape_rule_name']} | 예측: {results['predicted_shape']} (정답: {results['actual_shape']})")
-#     print(f"Color: {color_status} | 규칙: {results['color_rule_name']} | 예측: {sorted(list(results['predicted_palette']))} (정답: {sorted(list(results['actual_palette']))})")
-#     print("-" * 40)
-#
-# def analyze_dataset(challenge_file, solution_file):
-#     with open(challenge_file, 'r') as f: challenges = json.load(f)
-#     with open(solution_file, 'r') as f: solutions = json.load(f)
-#
-#     stats = {'total': 0, 'shape_correct': 0, 'color_correct': 0, 'total_correct': 0}
-#
-#     for task_id, task in challenges.items():
-#         if task_id not in solutions: continue
-#         
-#         train_tasks = _prepare_train_tasks(task)
-#         if not train_tasks: continue
-#
-#         stats['total'] += 1
-#         shape_rule_name, shape_rule_func = predict_shape(train_tasks)
-#         color_rule_name, color_rule_func = predict_color_palette(train_tasks)
-#
-#         test_input = task['test'][0]['input']
-#         leak_free_test_instance = {"input": test_input, "input_shape": Shape(len(test_input), len(test_input[0]))}
-#
-#         predicted_shape = shape_rule_func(leak_free_test_instance)
-#         predicted_palette = color_rule_func(leak_free_test_instance)
-#         
-#         actual_output = solutions[task_id][0]
-#         actual_shape = Shape(len(actual_output), len(actual_output[0]))
-#         actual_palette = set(np.array(actual_output).flatten())
-#
-#         shape_correct = (predicted_shape == actual_shape)
-#         color_correct = (predicted_palette == actual_palette)
-#         if shape_correct: stats['shape_correct'] += 1
-#         if color_correct: stats['color_correct'] += 1
-#         if shape_correct and color_correct: stats['total_correct'] += 1
-#
-#         _print_task_analysis(task_id, train_tasks, {
-#             'shape_correct': shape_correct, 'color_correct': color_correct,
-#             'shape_rule_name': shape_rule_name, 'color_rule_name': color_rule_name,
-#             'predicted_shape': predicted_shape, 'actual_shape': actual_shape,
-#             'predicted_palette': predicted_palette, 'actual_palette': actual_palette
-#         })
-#
-#     if stats['total'] > 0:
-#         print(f"\n--- 최종 결과: {Path(challenge_file).stem} ---")
-#         print(f"Shape 예측 성공률: {stats['shape_correct']/stats['total']:.2%} ({stats['shape_correct']}/{stats['total']})")
-#         print(f"Color 예측 성공률: {stats['color_correct']/stats['total']:.2%} ({stats['color_correct']}/{stats['total']})")
-#         print(f"Total 예측 성공률: {stats['total_correct']/stats['total']:.2%} ({stats['total_correct']}/{stats['total']})")
-#
-# if __name__ == "__main__":
-#     dataset_path = Path(__file__).parent.parent / 'datasets'
-#     
-#     print("="*20 + " 훈련 데이터셋 분석 " + "="*20)
-#     analyze_dataset(
-#         dataset_path / 'arc-agi_training_challenges.json',
-#         dataset_path / 'arc-agi_training_solutions.json'
-#     )
+def _print_task_analysis(task_id, train_tasks, results):
+    print(f"--- 평가 중: 태스크 ID: {task_id} ---")
+    print("[Train Data]")
+    for i, train_example in enumerate(train_tasks):
+        in_colors = sorted(list({int(c) for c in np.array(train_example['input']).flatten()}))
+        out_colors = sorted(list({int(c) for c in np.array(train_example['output']).flatten()}))
+        print(f"- 예제 {i+1}: Shape: {train_example['input_shape']} -> {train_example['output_shape']} | Colors: {in_colors} -> {out_colors}")
+    
+    print("\n[Prediction Result]")
+    shape_status = "성공!" if results['shape_correct'] else "실패!"
+    color_status = "성공!" if results['color_correct'] else "실패!"
+    
+    print(f"Shape: {shape_status} | 규칙: {results['shape_rule_name']} | 예측: {results['predicted_shape']} (정답: {results['actual_shape']})")
+    print(f"Color: {color_status} | 규칙: {results['color_rule_name']} | 예측: {sorted(list(results['predicted_palette']))} (정답: {sorted(list(results['actual_palette']))})")
+    print("-" * 40)
+def analyze_dataset(challenge_file, solution_file):
+    with open(challenge_file, 'r') as f: challenges = json.load(f)
+    with open(solution_file, 'r') as f: solutions = json.load(f)
+    stats = {'total': 0, 'shape_correct': 0, 'color_correct': 0, 'total_correct': 0}
+    for task_id, task in challenges.items():
+        if task_id not in solutions: continue
+        
+        train_tasks = _prepare_train_tasks(task)
+        if not train_tasks: continue
+        stats['total'] += 1
+        shape_rule_name, shape_rule_func = predict_shape(train_tasks)
+        color_rule_name, color_rule_func = predict_color_palette(train_tasks)
+        test_input = task['test'][0]['input']
+        leak_free_test_instance = {"input": test_input, "input_shape": Shape(len(test_input), len(test_input[0]))}
+        predicted_shape = shape_rule_func(leak_free_test_instance)
+        predicted_palette = color_rule_func(leak_free_test_instance)
+      
+        actual_output = solutions[task_id][0]
+        actual_shape = Shape(len(actual_output), len(actual_output[0]))
+        actual_palette = set(np.array(actual_output).flatten())
+        shape_correct = (predicted_shape == actual_shape)
+        color_correct = (predicted_palette == actual_palette)
+        if shape_correct: stats['shape_correct'] += 1
+        if color_correct: stats['color_correct'] += 1
+        if shape_correct and color_correct: stats['total_correct'] += 1
+
+        _print_task_analysis(task_id, train_tasks, {
+            'shape_correct': shape_correct, 'color_correct': color_correct,
+            'shape_rule_name': shape_rule_name, 'color_rule_name': color_rule_name,
+            'predicted_shape': predicted_shape, 'actual_shape': actual_shape,
+            'predicted_palette': predicted_palette, 'actual_palette': actual_palette
+        })
+
+    if stats['total'] > 0:
+        print(f"\n--- 최종 결과: {Path(challenge_file).stem} ---")
+        print(f"Shape 예측 성공률: {stats['shape_correct']/stats['total']:.2%} ({stats['shape_correct']}/{stats['total']})")
+        print(f"Color 예측 성공률: {stats['color_correct']/stats['total']:.2%} ({stats['color_correct']}/{stats['total']})")
+        print(f"Total 예측 성공률: {stats['total_correct']/stats['total']:.2%} ({stats['total_correct']}/{stats['total']})")
+
+if __name__ == "__main__":
+    dataset_path = Path(__file__).parent.parent / 'datasets'
+    
+    print("="*20 + " 훈련 데이터셋 분석 " + "="*20)
+    analyze_dataset(
+        dataset_path / 'arc-agi_training_challenges.json',
+        dataset_path / 'arc-agi_training_solutions.json'
+    )
