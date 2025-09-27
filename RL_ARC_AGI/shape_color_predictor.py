@@ -1,6 +1,3 @@
-# 이 스크립트는 ARC 과제의 훈련 예제를 분석하여, 테스트 문제의 출력 형태(shape)와 색상 팔레트를 예측하는 규칙 기반 엔진입니다.
-# 훈련 예제들에서 일관된 변환 규칙을 찾아내고, 이를 테스트 입력에 적용하여 결과를 추론합니다.
-
 import json
 from pathlib import Path
 from collections import Counter
@@ -252,6 +249,32 @@ def predict_color_palette(train_tasks):
     # 실패 규칙 2: 위 모든 규칙 실패 시, 모든 훈련 예제의 출력 색상을 합쳐서 사용
     all_output_colors = set.union(*[set(np.array(train_example['output']).flatten()) for train_example in train_tasks])
     return "color_union_transform", lambda t, colors=all_output_colors: colors
+
+def get_candidates_from_target(target_grid_img):
+    # Extract size from target_grid_img solution area (150:)
+    solution_area = target_grid_img[:, -30:]
+    unique_values = np.unique(solution_area)
+    non_10_values = unique_values[unique_values != 10]
+    if len(non_10_values) > 0:
+        # Find the actual grid size by looking at non-10 values
+        rows, cols = np.where(solution_area != 10)
+        if len(rows) > 0 and len(cols) > 0:
+            height = max(rows) + 1
+            width = max(cols) + 1
+            size_candidate = [height, width]
+        else:
+            raise ValueError("Cannot determine grid size: non-10 values has negative height or width")
+    else:
+        raise ValueError("Cannot determine grid size: no non-10 values found in solution area")
+
+    # Extract unique colors (0-9) from solution area only
+    unique_colors = np.unique(solution_area)
+    # Filter to only include colors 0-9 (excluding 10 which is padding)
+    valid_colors = unique_colors[(unique_colors >= 0) & (unique_colors <= 9)]
+    if len(valid_colors) == 0:
+        raise ValueError("Cannot determine color candidates: no valid colors (0-9) found in solution area")
+    color_candidate = valid_colors.tolist()
+    return size_candidate, color_candidate
 
 def predict_candidates_from_task_id(task_id, training_challenges):
     task = training_challenges.get(task_id)
