@@ -246,7 +246,7 @@ def preprocess_data_generator(challenges: Dict[str, Any], solutions: Dict[str, A
 
 
 from arc_agi_grid_env import ArcAgiGridEnv
-from shape_color_predictor import predict_candidates_from_task_id
+from shape_color_predictor import get_candidates_from_target
 
 def load_challenges_and_solutions(
                                     training_challenges_json: str,
@@ -369,8 +369,11 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
                 self._target_grid_img = self.eval_task_img_dict[self.task_id][self.pair_idx]
         self.test_input_idx = self.pair_idx
         
-        # ===================== active grid size and color candidate are determined by prediction ======================
-        self.size_candidate, self.color_candidate = predict_candidates_from_task_id(self.task_id, self.training_challenges)
+        # get_candidates_from_target의 경우 정답 쌍을 그대로 전달
+        self.size_candidate, self.color_candidate = get_candidates_from_target(self._target_grid_img)
+
+        # prediction의 경우 규칙 집합으로부터 예측
+        #self.size_candidate, self.color_candidate = predict_candidates_from_task_id(self.task_id, self.training_challenges)
 
         # Get rand_init option
         rand_init = options.get('rand_init', False) if options else False
