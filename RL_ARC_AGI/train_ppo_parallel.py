@@ -608,13 +608,19 @@ class ArcAgiVectorizedTrainer:
         # Optimizing the policy and value network
         b_inds = np.arange(batch_size)
         clipfracs = []
-        
+      
+        grad_acc = max(1, getattr(self.config.training, "gradient_accumulation_steps", 1))
+      
         for epoch in range(self.config.training.ppo_epochs):
             np.random.shuffle(b_inds)
             for start in range(0, batch_size, self.mini_batch_size):
                 end = start + self.mini_batch_size
                 mb_inds = b_inds[start:end]
 
+                mini_batch_idx = start // self.mini_batch_size
+                if mini_batch_idx % grad_acc == 0:
+                  self.optimizer.zero_grad()
+              
                 _, newlogprob, entropy, newvalue = self.process_batch_multi_gpu(b_obs[mb_inds], b_actions.long()[mb_inds])
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
@@ -656,7 +662,6 @@ class ArcAgiVectorizedTrainer:
                 if hasattr(self.config.training, 'gradient_accumulation_steps'):
                     loss = loss / self.config.training.gradient_accumulation_steps
 
-                self.optimizer.zero_grad()
                 loss.backward()
 
                 # Gradient accumulation step
