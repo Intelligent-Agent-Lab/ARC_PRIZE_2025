@@ -17,8 +17,10 @@ environment:
   rand_init: true
 
   # Vectorized environment specific settings
-  num_envs: 4  # Number of parallel environments
-  num_steps: 128  # Number of steps per environment per rollout
+  # For DDP, this is the number of environments per rank.
+  # Total envs = num_envs * world_size
+  num_envs: 4
+  num_steps: 256  # Number of steps per environment per rollout
 
 # Training configuration
 training:
@@ -37,13 +39,8 @@ training:
   norm_adv: true  # Advantage normalization
   clip_vloss: true  # Value function clipping
   target_kl: null  # Target KL divergence (null means no early stopping)
-  num_minibatches: 8  # Number of mini-batches for optimization
-
-  # Multi-GPU configuration (single machine) - batch distribution only
-  use_multi_gpu: false  # Enable multi-GPU batch processing
-  gpu_devices: [0, 1, 2, 3]  # GPU device indices to use for batch distribution
-  batch_size_total: 512  # Total batch size distributed across all GPUs
-  gradient_accumulation_steps: 1  # Steps to accumulate gradients
+  num_minibatches: 32  # Number of mini-batches for optimization
+  gradient_accumulation_steps: 2  # Steps to accumulate gradients before a synchronizing backward pass
 
 # Network configuration
 network:
