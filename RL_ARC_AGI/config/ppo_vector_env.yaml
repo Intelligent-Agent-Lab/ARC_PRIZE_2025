@@ -19,7 +19,7 @@ environment:
   # Vectorized environment specific settings
   # For DDP, this is the number of environments per rank.
   # Total envs = num_envs * num_devices
-  num_envs: 4
+  num_envs_per_gpu: 4
   num_steps: 256  # Number of steps per environment per rollout
 
 # Training configuration
