@@ -791,13 +791,13 @@ class ArcAgiVectorizedTrainer:
         self.envs.close()
 
 
-def train_rank(rank: int, num_devices: int, cfg: DictConfig) -> None:
+def train_multi_gpu(rank: int, num_devices: int, cfg: DictConfig) -> None:
     """A single process's training entry point."""
     # DDP environment setup
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12355'
     torch.cuda.set_device(rank)
-    dist.init_process_group("nccl", rank=rank, num_devices=num_devices)
+    dist.init_process_group("nccl", rank=rank, world_size=num_devices)
     
     # Isolate printing to the main process
     if rank == 0:
@@ -828,7 +828,7 @@ def main(cfg: DictConfig) -> None:
         print("No GPUs detected. DDP training requires at least one GPU.")
         return
         
-    mp.spawn(train_rank,
+    mp.spawn(train_multi_gpu,
              args=(num_devices, cfg),
              nprocs=num_devices,
              join=True)
