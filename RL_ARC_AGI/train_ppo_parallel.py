@@ -430,7 +430,8 @@ class ArcAgiVectorizedTrainer:
             print(f"Warning: Could not visualize grid at iteration {iteration}: {e}")
         
     def collect_rollouts(self, next_obs, next_done, iteration: int):
-        """Collect rollout data for training, ensuring DDP wrapper is always called."""
+        """Collect rollout data for training using vectorized environments."""
+        # Reset environments
         for step in range(self.num_steps):
             self.obs[step] = next_obs
             self.dones[step] = next_done
@@ -479,10 +480,12 @@ class ArcAgiVectorizedTrainer:
             # Log episode statistics when episodes end
             for i in range(self.num_envs_per_gpu):
                 if terminations[i] or truncations[i]:
+                    # Episode ended - log stats
                     self.episode_returns.append(self.current_episode_returns[i])
                     self.episode_lengths.append(self.current_episode_lengths[i])
                     self.success_rate.append(1.0 if self.current_episode_returns[i] > 10.0 else 0.0)
-                    
+
+                    # Reset tracking for this environment
                     self.current_episode_returns[i] = 0.0
                     self.current_episode_lengths[i] = 0
         
@@ -609,7 +612,7 @@ class ArcAgiVectorizedTrainer:
             if self.config.training.target_kl is not None and approx_kl > self.config.training.target_kl:
                 break
 
-        # Calculate explained variance                    
+        # Calculate explained variance
         y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
         var_y = np.var(y_true)
         explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y
