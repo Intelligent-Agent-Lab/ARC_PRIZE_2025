@@ -62,6 +62,6 @@ logging:
   save_interval: 500
   save_dir: "models/vectorized"
   visualize_period: 2
-  use_wandb: true
-  use_tensorboard: true
+  use_wandb: false # 잠시 꺼놓기 
+  use_tensorboard: false
   wandb_project: "arc_agi_ppo_vectorized"
