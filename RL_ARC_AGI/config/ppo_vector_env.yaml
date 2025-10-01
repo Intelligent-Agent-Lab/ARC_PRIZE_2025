@@ -39,7 +39,7 @@ training:
   norm_adv: true  # Advantage normalization
   clip_vloss: true  # Value function clipping
   target_kl: null  # Target KL divergence (null means no early stopping)
-  num_minibatches: 32  # Number of mini-batches for optimization
+  num_minibatches_per_gpu: 32  # Number of mini-batches for optimization
   gradient_accumulation_steps: 2  # Steps to accumulate gradients before a synchronizing backward pass
 
 # Network configuration
