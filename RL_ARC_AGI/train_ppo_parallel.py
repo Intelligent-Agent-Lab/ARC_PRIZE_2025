@@ -241,10 +241,10 @@ class Agent(nn.Module):
 class ArcAgiVectorizedTrainer:
     """Trainer class for PPO with vectorized ArcAgiGrid environments."""
     
-    def __init__(self, config: DictConfig, rank: int, world_size: int):
+    def __init__(self, config: DictConfig, rank: int, num_devices: int):
         self.config = config
         self.rank = rank
-        self.world_size = world_size
+        self.num_devices = num_devices
         
         self.setup_environment()
         self.setup_agent()
@@ -305,7 +305,7 @@ class ArcAgiVectorizedTrainer:
         if self.rank == 0:
             print(f"Vectorized environments created successfully!")
             print(f"Number of environments per rank: {self.num_envs}")
-            print(f"Actual total environments: {self.num_envs * self.world_size}")
+            print(f"Actual total environments: {self.num_envs * self.num_devices}")
             print(f"Single observation space: {self.envs.single_observation_space}")
             print(f"Single action space: {self.envs.single_action_space}")
         
@@ -631,11 +631,11 @@ class ArcAgiVectorizedTrainer:
 
         # Calculate training parameters
         batch_size_per_rank = self.num_envs * self.num_steps
-        total_batch_size = batch_size_per_rank * self.world_size
+        total_batch_size = batch_size_per_rank * self.num_devices
         num_iterations = self.config.training.total_timesteps // total_batch_size
 
         if self.rank == 0:
-            print(f"Total Timesteps: {self.config.training.total_timesteps}, World Size: {self.world_size}")
+            print(f"Total Timesteps: {self.config.training.total_timesteps}, World Size: {self.num_devices}")
             print(f"Batch Size per Rank: {batch_size_per_rank}, Total Batch Size: {total_batch_size}")
             print(f"Number of Iterations: {num_iterations}")
 
@@ -790,13 +790,13 @@ class ArcAgiVectorizedTrainer:
         self.envs.close()
 
 
-def train_rank(rank: int, world_size: int, cfg: DictConfig) -> None:
+def train_rank(rank: int, num_devices: int, cfg: DictConfig) -> None:
     """A single process's training entry point."""
     # DDP environment setup
     os.environ['MASTER_ADDR'] = 'localhost'
     os.environ['MASTER_PORT'] = '12355'
     torch.cuda.set_device(rank)
-    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+    dist.init_process_group("nccl", rank=rank, num_devices=num_devices)
     
     # Isolate printing to the main process
     if rank == 0:
@@ -812,7 +812,7 @@ def train_rank(rank: int, world_size: int, cfg: DictConfig) -> None:
     np.random.seed(cfg.environment.seed + rank)
     
     # Create trainer and start training
-    trainer = ArcAgiVectorizedTrainer(cfg, rank, world_size)
+    trainer = ArcAgiVectorizedTrainer(cfg, rank, num_devices)
     trainer.train()
 
     # Cleanup
@@ -821,15 +821,15 @@ def train_rank(rank: int, world_size: int, cfg: DictConfig) -> None:
 @hydra.main(version_base=None, config_path="config", config_name="ppo_vector_env")
 def main(cfg: DictConfig) -> None:
     """Spawns DDP training processes."""
-    world_size = torch.cuda.device_count()
-    # Ensure world_size is not zero
-    if world_size == 0:
+    num_devices = torch.cuda.device_count()
+    # Ensure num_devices is not zero
+    if num_devices == 0:
         print("No GPUs detected. DDP training requires at least one GPU.")
         return
         
     mp.spawn(train_rank,
-             args=(world_size, cfg),
-             nprocs=world_size,
+             args=(num_devices, cfg),
+             nprocs=num_devices,
              join=True)
 
 
