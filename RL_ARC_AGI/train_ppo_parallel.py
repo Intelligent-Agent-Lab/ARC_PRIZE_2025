@@ -278,7 +278,7 @@ class ArcAgiVectorizedTrainer:
         self.task_id = self.config.environment.task_id
         self.pair_idx = self.config.environment.pair_idx
         
-        self.num_envs = int(self.config.environment.num_envs)
+        self.num_envs_per_gpu = int(self.config.environment.num_envs_per_gpu)
         self.num_steps = self.config.environment.num_steps
         
         # Get size_candidate and color_candidate from config if available
@@ -299,13 +299,13 @@ class ArcAgiVectorizedTrainer:
                 test_challenges=test_challenges,
                 train_task_img_dict=train_task_img_dict,
                 eval_task_img_dict=eval_task_img_dict
-            ) for i in range(self.num_envs)
+            ) for i in range(self.num_envs_per_gpu)
         ])
 
         if self.rank == 0:
             print(f"Vectorized environments created successfully!")
-            print(f"Number of environments per rank: {self.num_envs}")
-            print(f"Actual total environments: {self.num_envs * self.num_devices}")
+            print(f"Number of environments per rank: {self.num_envs_per_gpu}")
+            print(f"Actual total environments: {self.num_envs_per_gpu * self.num_devices}")
             print(f"Single observation space: {self.envs.single_observation_space}")
             print(f"Single action space: {self.envs.single_action_space}")
         
@@ -320,13 +320,13 @@ class ArcAgiVectorizedTrainer:
 
         # Create optimizer for the DDP-wrapped model
         self.optimizer = optim.Adam(
-            self.agent.module.parameters(),  # Use .module to access original model
+            self.agent.parameters(),  # Use .module to access original model
             lr=self.config.training.learning_rate,
             eps=1e-5
         )
 
         # Calculate mini-batch size per process
-        self.mini_batch_size = int(self.config.environment.num_steps * self.config.environment.num_envs / self.config.training.num_minibatches_per_gpu)
+        self.mini_batch_size = int(self.config.environment.num_steps * self.config.environment.num_envs_per_gpu / self.config.training.num_minibatches_per_gpu)
 
         if self.rank == 0:
             print(f"PPO DDP Agent created on device: {self.device}")
@@ -337,9 +337,9 @@ class ArcAgiVectorizedTrainer:
     def setup_logging(self):
         """Setup logging and metrics tracking for the main process."""
         # These deques will live on each process, but only rank 0 will aggregate and log
-        self.episode_returns = deque(maxlen=self.config.environment.num_envs)
-        self.episode_lengths = deque(maxlen=self.config.environment.num_envs)
-        self.success_rate = deque(maxlen=self.config.environment.num_envs)
+        self.episode_returns = deque(maxlen=self.config.environment.num_envs_per_gpu)
+        self.episode_lengths = deque(maxlen=self.config.environment.num_envs_per_gpu)
+        self.success_rate = deque(maxlen=self.config.environment.num_envs_per_gpu)
         
         self.tensorboard_writer = None
         # Logging and directory creation should only happen on the main process
@@ -370,16 +370,16 @@ class ArcAgiVectorizedTrainer:
     
     def setup_storage(self):
         """Setup storage for rollout data."""
-        self.obs = torch.zeros((self.num_steps, self.num_envs) + (30, 180)).to(self.device)
-        self.actions = torch.zeros((self.num_steps, self.num_envs)).to(self.device)
-        self.logprobs = torch.zeros((self.num_steps, self.num_envs)).to(self.device)
-        self.rewards = torch.zeros((self.num_steps, self.num_envs)).to(self.device)
-        self.dones = torch.zeros((self.num_steps, self.num_envs)).to(self.device)
-        self.values = torch.zeros((self.num_steps, self.num_envs)).to(self.device)
+        self.obs = torch.zeros((self.num_steps, self.num_envs_per_gpu) + (30, 180)).to(self.device)
+        self.actions = torch.zeros((self.num_steps, self.num_envs_per_gpu)).to(self.device)
+        self.logprobs = torch.zeros((self.num_steps, self.num_envs_per_gpu)).to(self.device)
+        self.rewards = torch.zeros((self.num_steps, self.num_envs_per_gpu)).to(self.device)
+        self.dones = torch.zeros((self.num_steps, self.num_envs_per_gpu)).to(self.device)
+        self.values = torch.zeros((self.num_steps, self.num_envs_per_gpu)).to(self.device)
         
         # Manual episode tracking
-        self.current_episode_returns = np.zeros(self.num_envs)
-        self.current_episode_lengths = np.zeros(self.num_envs)
+        self.current_episode_returns = np.zeros(self.num_envs_per_gpu)
+        self.current_episode_lengths = np.zeros(self.num_envs_per_gpu)
     
     def visualize_grid(self, iteration: int, w=0.5, first=False):
         """Visualize current grid state and log to wandb/tensorboard."""
@@ -477,7 +477,7 @@ class ArcAgiVectorizedTrainer:
             self.current_episode_lengths += 1
             
             # Log episode statistics when episodes end
-            for i in range(self.num_envs):
+            for i in range(self.num_envs_per_gpu):
                 if terminations[i] or truncations[i]:
                     self.episode_returns.append(self.current_episode_returns[i])
                     self.episode_lengths.append(self.current_episode_lengths[i])
@@ -516,7 +516,7 @@ class ArcAgiVectorizedTrainer:
     def update_agent(self, advantages, returns, global_step):
         """Update the agent using PPO."""
         # Flatten the batch
-        batch_size = self.num_envs * self.num_steps
+        batch_size = self.num_envs_per_gpu * self.num_steps
         b_obs = self.obs.reshape((-1,) + self.envs.single_observation_space.shape)
         b_logprobs = self.logprobs.reshape(-1)
         b_actions = self.actions.reshape(-1)
@@ -527,7 +527,8 @@ class ArcAgiVectorizedTrainer:
         # Optimizing the policy and value network
         b_inds = np.arange(batch_size)
         clipfracs = []
-        
+
+        # num of gradient accumulation steps
         grad_acc = max(1, getattr(self.config.training, "gradient_accumulation_steps", 1))
 
         for epoch in range(self.config.training.ppo_epochs):
@@ -630,7 +631,7 @@ class ArcAgiVectorizedTrainer:
             print(f"Configuration: {self.config}")
 
         # Calculate training parameters
-        batch_size_per_rank = self.num_envs * self.num_steps
+        batch_size_per_rank = self.num_envs_per_gpu * self.num_steps
         total_batch_size = batch_size_per_rank * self.num_devices
         num_iterations = self.config.training.total_timesteps // total_batch_size
 
@@ -650,7 +651,7 @@ class ArcAgiVectorizedTrainer:
         }
         next_obs, infos = self.envs.reset(seed=self.seed + self.rank, options=reset_options)
         next_obs = torch.Tensor(next_obs).to(self.device)
-        next_done = torch.zeros(self.num_envs).to(self.device)
+        next_done = torch.zeros(self.num_envs_per_gpu).to(self.device)
         
         # Store initial infos for first action
         self.current_infos = infos
