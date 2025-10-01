@@ -278,10 +278,7 @@ class ArcAgiVectorizedTrainer:
         self.task_id = self.config.environment.task_id
         self.pair_idx = self.config.environment.pair_idx
         
-        # Interpret num_envs from config as TOTAL envs, and divide among ranks
-        total_num_envs = self.config.environment.num_envs
-        self.num_envs = total_num_envs // self.world_size
-        
+        self.num_envs = int(self.config.environment.num_envs)
         self.num_steps = self.config.environment.num_steps
         
         # Get size_candidate and color_candidate from config if available
