@@ -326,7 +326,7 @@ class ArcAgiVectorizedTrainer:
         )
 
         # Calculate mini-batch size per process
-        self.mini_batch_size = int(self.config.environment.num_steps * self.config.environment.num_envs / self.config.training.num_minibatches)
+        self.mini_batch_size = int(self.config.environment.num_steps * self.config.environment.num_envs / self.config.training.num_minibatches_per_gpu)
 
         if self.rank == 0:
             print(f"PPO DDP Agent created on device: {self.device}")
