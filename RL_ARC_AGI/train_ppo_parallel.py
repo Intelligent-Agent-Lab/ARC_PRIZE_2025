@@ -304,7 +304,6 @@ class ArcAgiVectorizedTrainer:
 
         if self.rank == 0:
             print(f"Vectorized environments created successfully!")
-            print(f"Config total_num_envs: {total_num_envs}")
             print(f"Number of environments per rank: {self.num_envs}")
             print(f"Actual total environments: {self.num_envs * self.world_size}")
             print(f"Single observation space: {self.envs.single_observation_space}")
