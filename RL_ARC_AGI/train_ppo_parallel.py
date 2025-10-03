@@ -10,6 +10,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import gymnasium as gym
+import torch.distributed as dist
+import torch.multiprocessing as mp
+from torch.nn.parallel import DistributedDataParallel as DDP
 from collections import deque
 import hydra
 from omegaconf import DictConfig, OmegaConf
@@ -238,8 +241,11 @@ class Agent(nn.Module):
 class ArcAgiVectorizedTrainer:
     """Trainer class for PPO with vectorized ArcAgiGrid environments."""
     
-    def __init__(self, config: DictConfig):
+    def __init__(self, config: DictConfig, rank: int, num_devices: int):
         self.config = config
+        self.rank = rank
+        self.num_devices = num_devices
+        
         self.setup_environment()
         self.setup_agent()
         self.setup_logging()
@@ -271,7 +277,8 @@ class ArcAgiVectorizedTrainer:
         self.fixed_pair_idx = self.config.environment.fixed_pair_idx
         self.task_id = self.config.environment.task_id
         self.pair_idx = self.config.environment.pair_idx
-        self.num_envs = self.config.environment.num_envs
+        
+        self.num_envs_per_gpu = int(self.config.environment.num_envs_per_gpu)
         self.num_steps = self.config.environment.num_steps
         
         # Get size_candidate and color_candidate from config if available
@@ -292,184 +299,87 @@ class ArcAgiVectorizedTrainer:
                 test_challenges=test_challenges,
                 train_task_img_dict=train_task_img_dict,
                 eval_task_img_dict=eval_task_img_dict
-            ) for i in range(self.num_envs)
+            ) for i in range(self.num_envs_per_gpu)
         ])
 
-        print(f"Vectorized environments created successfully!")
-        print(f"Number of environments: {self.num_envs}")
-        print(f"Single observation space: {self.envs.single_observation_space}")
-        print(f"Single action space: {self.envs.single_action_space}")
+        if self.rank == 0:
+            print(f"Vectorized environments created successfully!")
+            print(f"Number of environments per rank: {self.num_envs_per_gpu}")
+            print(f"Actual total environments: {self.num_envs_per_gpu * self.num_devices}")
+            print(f"Single observation space: {self.envs.single_observation_space}")
+            print(f"Single action space: {self.envs.single_action_space}")
         
     def setup_agent(self):
-        """Setup the PPO agent."""
-        # Calculate action space size
-        obs_size = np.prod(self.envs.single_observation_space.shape)
-        action_size = 9000 # 10 colors * 30x30 coordinate space
+        """Setup the DDP agent for the current process (rank)."""
+        self.device = torch.device(f"cuda:{self.rank}")
 
-        print(f"setup_agent. obs_size: {obs_size}, action_size: {action_size}")
+        # Create agent and move to the correct device
+        agent = Agent(self.config).to(self.device)
+        # Wrap the agent with DDP
+        self.agent = DDP(agent, device_ids=[self.rank])
 
-        # Set device and multi-GPU configuration
-        if hasattr(self.config.training, 'use_multi_gpu') and self.config.training.use_multi_gpu:
-            if torch.cuda.device_count() > 1:
-                print(f"Using {torch.cuda.device_count()} GPUs for batch distribution")
-                self.device = torch.device("cuda:0")  # Primary device for model
-                self.use_multi_gpu = True
-                if hasattr(self.config.training, 'gpu_devices'):
-                    self.gpu_devices = self.config.training.gpu_devices[:torch.cuda.device_count()]
-                else:
-                    self.gpu_devices = list(range(torch.cuda.device_count()))
-                print(f"Available GPUs for batch processing: {self.gpu_devices}")
-            else:
-                print("Multi-GPU requested but only 1 GPU available, using single GPU")
-                self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-                self.use_multi_gpu = False
-                self.gpu_devices = [0]
-        else:
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            self.use_multi_gpu = False
-            self.gpu_devices = [0]
-
-        # Create agent (model stays on primary GPU)
-        self.agent = Agent(self.config).to(self.device)
-
-        # Create model replicas on other GPUs for batch distribution
-        if self.use_multi_gpu and len(self.gpu_devices) > 1:
-            self.agents_on_gpus = {}
-            for gpu_id in self.gpu_devices:
-                if gpu_id != 0:  # Primary model is already on GPU 0
-                    agent_replica = Agent(self.config).to(f'cuda:{gpu_id}')
-                    agent_replica.load_state_dict(self.agent.state_dict())
-                    self.agents_on_gpus[gpu_id] = agent_replica
-            print(f"Created model replicas on GPUs: {list(self.agents_on_gpus.keys())}")
-        else:
-            self.agents_on_gpus = {}
-
-        # Create optimizer
+        # Create optimizer for the DDP-wrapped model
         self.optimizer = optim.Adam(
-            self.agent.parameters(),
+            self.agent.parameters(),  # Use .module to access original model
             lr=self.config.training.learning_rate,
             eps=1e-5
         )
 
-        # Adjust batch size for multi-GPU training
-        if hasattr(self.config.training, 'batch_size_total') and self.use_multi_gpu:
-            total_batch_size = self.config.training.batch_size_total
-            self.mini_batch_size = int(total_batch_size / self.config.training.num_minibatches)
-            # Ensure mini_batch_size is divisible by number of GPUs for even distribution
-            if self.mini_batch_size % len(self.gpu_devices) != 0:
-                self.mini_batch_size = (self.mini_batch_size // len(self.gpu_devices)) * len(self.gpu_devices)
-                print(f"Adjusted mini_batch_size to {self.mini_batch_size} for even GPU distribution")
-        else:
-            self.mini_batch_size = int(self.config.environment.num_steps * self.config.environment.num_envs / self.config.training.num_minibatches)
+        # Calculate mini-batch size per process
+        self.mini_batch_size = int(self.config.environment.num_steps * self.config.environment.num_envs_per_gpu / self.config.training.num_minibatches_per_gpu)
 
-        print(f"PPO Agent created with device: {self.device}")
-        print(f"Multi-GPU batch distribution enabled: {self.use_multi_gpu}")
-        print(f"Mini batch size: {self.mini_batch_size}")
-        if self.use_multi_gpu:
-            print(f"Batch size per GPU: {self.mini_batch_size // len(self.gpu_devices)}")
+        if self.rank == 0:
+            print(f"PPO DDP Agent created on device: {self.device}")
+            print(f"Mini batch size per GPU: {self.mini_batch_size}")
 
-    def sync_model_replicas(self):
-        """Sync model replicas with the primary model."""
-        if self.use_multi_gpu and self.agents_on_gpus:
-            primary_state = self.agent.state_dict()
-            for gpu_id, agent_replica in self.agents_on_gpus.items():
-                agent_replica.load_state_dict(primary_state)
 
-    def process_batch_multi_gpu(self, batch_obs, batch_actions):
-        """Process batch across multiple GPUs and gather results."""
-        if not self.use_multi_gpu or len(self.gpu_devices) == 1:
-            # Single GPU processing
-            return self.agent.get_action_and_value(batch_obs, batch_actions)
-
-        # Sync model replicas with primary model
-        self.sync_model_replicas()
-
-        # Split batch across GPUs
-        batch_size = batch_obs.shape[0]
-        chunk_size = batch_size // len(self.gpu_devices)
-
-        results = []
-        for i, gpu_id in enumerate(self.gpu_devices):
-            start_idx = i * chunk_size
-            end_idx = start_idx + chunk_size if i < len(self.gpu_devices) - 1 else batch_size
-
-            # Move chunk to specific GPU
-            chunk_obs = batch_obs[start_idx:end_idx].to(f'cuda:{gpu_id}')
-            chunk_actions = batch_actions[start_idx:end_idx].to(f'cuda:{gpu_id}') if batch_actions is not None else None
-
-            # Use appropriate model (primary or replica)
-            if gpu_id == 0:
-                agent_to_use = self.agent
-            else:
-                agent_to_use = self.agents_on_gpus[gpu_id]
-
-            # Process chunk
-            if chunk_actions is not None:
-                chunk_result = agent_to_use.get_action_and_value(chunk_obs, chunk_actions)
-            else:
-                chunk_result = agent_to_use.get_action_and_value(chunk_obs)
-
-            # Move results back to primary device
-            chunk_result = [tensor.to(self.device) if tensor is not None else None for tensor in chunk_result]
-            results.append(chunk_result)
-
-        # Concatenate results
-        if results:
-            concatenated = []
-            for tensor_idx in range(len(results[0])):
-                tensors = [result[tensor_idx] for result in results if result[tensor_idx] is not None]
-                if tensors:
-                    concatenated.append(torch.cat(tensors, dim=0))
-                else:
-                    concatenated.append(None)
-            return tuple(concatenated)
-
-        return self.agent.get_action_and_value(batch_obs, batch_actions)
         
     def setup_logging(self):
-        """Setup logging and metrics tracking."""
-        self.episode_returns = deque(maxlen=self.config.environment.num_envs)
-        self.episode_lengths = deque(maxlen=self.config.environment.num_envs)
-        self.success_rate = deque(maxlen=self.config.environment.num_envs)
+        """Setup logging and metrics tracking for the main process."""
+        # These deques will live on each process, but only rank 0 will aggregate and log
+        self.episode_returns = deque(maxlen=self.config.environment.num_envs_per_gpu)
+        self.episode_lengths = deque(maxlen=self.config.environment.num_envs_per_gpu)
+        self.success_rate = deque(maxlen=self.config.environment.num_envs_per_gpu)
         
-        # Create save directory
-        os.makedirs(self.config.logging.save_dir, exist_ok=True)
-        
-        # Initialize wandb logger
-        if self.config.logging.use_wandb:
+        self.tensorboard_writer = None
+        # Logging and directory creation should only happen on the main process
+        if self.rank == 0:
+            # Create save directory
+            os.makedirs(self.config.logging.save_dir, exist_ok=True)
+            
             run_name = f"ppo_vectorized_{self.task_id}_{int(time.time())}"
-            wandb.init(
-                project=self.config.logging.wandb_project,
-                config=OmegaConf.to_container(self.config, resolve=True),
-                name=run_name,
-                sync_tensorboard=True,
-                monitor_gym=True,
-                save_code=True
-            )
-        
-        # Initialize tensorboard logger
-        if self.config.logging.use_tensorboard:
-            run_name = f"ppo_vectorized_{self.task_id}_{int(time.time())}"
-            self.tensorboard_writer = SummaryWriter(f"runs/{run_name}")
-            self.tensorboard_writer.add_text(
-                "hyperparameters",
-                "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in OmegaConf.to_container(self.config, resolve=True).items()])),
-            )
-        else:
-            self.tensorboard_writer = None
+            
+            # Initialize wandb logger
+            if self.config.logging.use_wandb:
+                wandb.init(
+                    project=self.config.logging.wandb_project,
+                    config=OmegaConf.to_container(self.config, resolve=True),
+                    name=run_name,
+                    sync_tensorboard=True,
+                    monitor_gym=True,
+                    save_code=True
+                )
+            
+            # Initialize tensorboard logger
+            if self.config.logging.use_tensorboard:
+                self.tensorboard_writer = SummaryWriter(f"runs/{run_name}")
+                self.tensorboard_writer.add_text(
+                    "hyperparameters",
+                    "|param|value|\n|-|-|\n%s" % ("\n".join([f"|{key}|{value}|" for key, value in OmegaConf.to_container(self.config, resolve=True).items()])),
+                )
     
     def setup_storage(self):
         """Setup storage for rollout data."""
-        self.obs = torch.zeros((self.num_steps, self.num_envs) + (30, 180)).to(self.device)
-        self.actions = torch.zeros((self.num_steps, self.num_envs)).to(self.device)
-        self.logprobs = torch.zeros((self.num_steps, self.num_envs)).to(self.device)
-        self.rewards = torch.zeros((self.num_steps, self.num_envs)).to(self.device)
-        self.dones = torch.zeros((self.num_steps, self.num_envs)).to(self.device)
-        self.values = torch.zeros((self.num_steps, self.num_envs)).to(self.device)
+        self.obs = torch.zeros((self.num_steps, self.num_envs_per_gpu) + (30, 180)).to(self.device)
+        self.actions = torch.zeros((self.num_steps, self.num_envs_per_gpu)).to(self.device)
+        self.logprobs = torch.zeros((self.num_steps, self.num_envs_per_gpu)).to(self.device)
+        self.rewards = torch.zeros((self.num_steps, self.num_envs_per_gpu)).to(self.device)
+        self.dones = torch.zeros((self.num_steps, self.num_envs_per_gpu)).to(self.device)
+        self.values = torch.zeros((self.num_steps, self.num_envs_per_gpu)).to(self.device)
         
         # Manual episode tracking
-        self.current_episode_returns = np.zeros(self.num_envs)
-        self.current_episode_lengths = np.zeros(self.num_envs)
+        self.current_episode_returns = np.zeros(self.num_envs_per_gpu)
+        self.current_episode_lengths = np.zeros(self.num_envs_per_gpu)
     
     def visualize_grid(self, iteration: int, w=0.5, first=False):
         """Visualize current grid state and log to wandb/tensorboard."""
@@ -522,21 +432,31 @@ class ArcAgiVectorizedTrainer:
     def collect_rollouts(self, next_obs, next_done, iteration: int):
         """Collect rollout data for training using vectorized environments."""
         # Reset environments
-        
         for step in range(self.num_steps):
             self.obs[step] = next_obs
             self.dones[step] = next_done
 
             # ALGO LOGIC: action logic
             with torch.no_grad():
+                # DDP 래퍼 자체를 직접 호출하는 것으로 변경
+                # 이전처럼 내부 모듈을 직접 호출하면 forward 훅을 우회하는 작업임
+                action_logits, value = self.agent(next_obs)
+                self.values[step] = value.flatten()
+
                 # Use current infos for action masking (from previous step or reset)
                 current_infos = getattr(self, 'current_infos', None)
-                
-                # Check for critical errors only
-                if current_infos is None:
+                if current_infos is not None:
+                    # Call the mask creation method from the underlying module
+                    action_mask = self.agent.module._create_action_mask(next_obs, current_infos)
+                    action_logits = action_logits + action_mask
+                else:
                     print(f"WARNING: current_infos is None at step {step}!")
-                action, logprob, _, value = self.agent.get_action_and_value(next_obs, obs_info=current_infos)
-                self.values[step] = value.flatten()
+
+                # Sample action and get log probability
+                probs = Categorical(logits=action_logits)
+                action = probs.sample()
+                logprob = probs.log_prob(action)
+
             self.actions[step] = action
             self.logprobs[step] = logprob
 
@@ -544,10 +464,9 @@ class ArcAgiVectorizedTrainer:
             dict_action = vectorized_action_converter(action.cpu())
             next_obs, reward, terminations, truncations, infos = self.envs.step(dict_action)
             
-            
             # Log action details disabled for clean output
             # log_action_details(action, infos, step + iteration * self.num_steps)
-            
+
             # Store current infos for next step
             self.current_infos = infos
             next_done = np.logical_or(terminations, truncations)
@@ -559,20 +478,23 @@ class ArcAgiVectorizedTrainer:
             self.current_episode_lengths += 1
             
             # Log episode statistics when episodes end
-            for i in range(self.num_envs):
+            for i in range(self.num_envs_per_gpu):
                 if terminations[i] or truncations[i]:
                     # Episode ended - log stats
                     self.episode_returns.append(self.current_episode_returns[i])
                     self.episode_lengths.append(self.current_episode_lengths[i])
                     self.success_rate.append(1.0 if self.current_episode_returns[i] > 10.0 else 0.0)
-                    
+
                     # Reset tracking for this environment
                     self.current_episode_returns[i] = 0.0
                     self.current_episode_lengths[i] = 0
         
         # Bootstrap value for the next state
         with torch.no_grad():
-            next_value = self.agent.get_value(next_obs).reshape(1, -1)
+            # --- Correct DDP Forward Pass for Value ---
+            _, next_value = self.agent(next_obs)
+            next_value = next_value.reshape(1, -1)
+            # --- End Correct DDP Forward Pass ---
             
         return next_value
 
@@ -597,7 +519,7 @@ class ArcAgiVectorizedTrainer:
     def update_agent(self, advantages, returns, global_step):
         """Update the agent using PPO."""
         # Flatten the batch
-        batch_size = self.num_envs * self.num_steps
+        batch_size = self.num_envs_per_gpu * self.num_steps
         b_obs = self.obs.reshape((-1,) + self.envs.single_observation_space.shape)
         b_logprobs = self.logprobs.reshape(-1)
         b_actions = self.actions.reshape(-1)
@@ -608,20 +530,28 @@ class ArcAgiVectorizedTrainer:
         # Optimizing the policy and value network
         b_inds = np.arange(batch_size)
         clipfracs = []
-      
+
+        # num of gradient accumulation steps
         grad_acc = max(1, getattr(self.config.training, "gradient_accumulation_steps", 1))
-      
+
         for epoch in range(self.config.training.ppo_epochs):
             np.random.shuffle(b_inds)
+
             for start in range(0, batch_size, self.mini_batch_size):
                 end = start + self.mini_batch_size
                 mb_inds = b_inds[start:end]
-
+                
                 mini_batch_idx = start // self.mini_batch_size
                 if mini_batch_idx % grad_acc == 0:
-                  self.optimizer.zero_grad()
-              
-                _, newlogprob, entropy, newvalue = self.process_batch_multi_gpu(b_obs[mb_inds], b_actions.long()[mb_inds])
+                    self.optimizer.zero_grad()
+                
+                action_logits, newvalue = self.agent(b_obs[mb_inds])
+                
+                # compute probs, logprob, and entropy
+                probs = Categorical(logits=action_logits)
+                newlogprob = probs.log_prob(b_actions.long()[mb_inds])
+                entropy = probs.entropy()
+
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
 
@@ -634,12 +564,12 @@ class ArcAgiVectorizedTrainer:
                 mb_advantages = b_advantages[mb_inds]
                 if self.config.training.norm_adv:
                     mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
-
+                
                 # Policy loss
                 pg_loss1 = -mb_advantages * ratio
                 pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - self.config.training.eps_clip, 1 + self.config.training.eps_clip)
                 pg_loss = torch.max(pg_loss1, pg_loss2).mean()
-
+                
                 # Value loss
                 newvalue = newvalue.view(-1)
                 if self.config.training.clip_vloss:
@@ -657,21 +587,27 @@ class ArcAgiVectorizedTrainer:
 
                 entropy_loss = entropy.mean()
                 loss = pg_loss - self.config.training.entropy_coef * entropy_loss + v_loss * self.config.training.value_coef
-
-                # Handle gradient accumulation for multi-GPU training
+                
                 if hasattr(self.config.training, 'gradient_accumulation_steps'):
-                    loss = loss / self.config.training.gradient_accumulation_steps
+                    loss = loss / grad_acc
 
-                loss.backward()
-
-                # Gradient accumulation step
-                if hasattr(self.config.training, 'gradient_accumulation_steps') and self.config.training.gradient_accumulation_steps > 1:
-                    if (start // self.mini_batch_size + 1) % self.config.training.gradient_accumulation_steps == 0:
-                        nn.utils.clip_grad_norm_(self.agent.parameters(), self.config.training.max_grad_norm)
-                        self.optimizer.step()
+                # --- Correct Gradient Accumulation ---
+                # 새로운 미니배치가 들어오기 바로 직전(마지막 누적일때)
+                # 축적된 그래디언트가 gpu 간 동기화되고 평균 계산
+                is_sync_step = (mini_batch_idx + 1) % grad_acc == 0
+                
+                # Last accumulation step or last micro-batch in epoch, sync gradients
+                if is_sync_step:
+                    loss.backward()
                 else:
+                    # Accumulation step, don't sync
+                    with self.agent.no_sync():
+                        loss.backward()
+                
+                if is_sync_step:
                     nn.utils.clip_grad_norm_(self.agent.parameters(), self.config.training.max_grad_norm)
                     self.optimizer.step()
+                # --- End Correct Gradient Accumulation ---
 
             if self.config.training.target_kl is not None and approx_kl > self.config.training.target_kl:
                 break
@@ -693,178 +629,212 @@ class ArcAgiVectorizedTrainer:
 
     def train(self):
         """Main training loop."""
-        print("Starting PPO vectorized training...")
-        print(f"Configuration: {self.config}")
-        
+        if self.rank == 0:
+            print("Starting PPO training...")
+            print(f"Configuration: {self.config}")
+
         # Calculate training parameters
-        batch_size = self.num_envs * self.num_steps
-        num_iterations = self.config.training.total_timesteps // batch_size
-        
-        print(f"Batch size: {batch_size}")
-        print(f"Number of iterations: {num_iterations}")
-        
+        batch_size_per_rank = self.num_envs_per_gpu * self.num_steps
+        total_batch_size = batch_size_per_rank * self.num_devices
+        num_iterations = self.config.training.total_timesteps // total_batch_size
+
+        if self.rank == 0:
+            print(f"Total Timesteps: {self.config.training.total_timesteps}, World Size: {self.num_devices}")
+            print(f"Batch Size per Rank: {batch_size_per_rank}, Total Batch Size: {total_batch_size}")
+            print(f"Number of Iterations: {num_iterations}")
+
         global_step = 0
         start_time = time.time()
         best_mean_reward = -float('inf')
         first_vis = True
-        
+
         reset_options = {
             'size_candidate': self.size_candidate,
             'color_candidate': self.color_candidate
         }
-        next_obs, infos = self.envs.reset(seed=self.seed, options=reset_options)
+        next_obs, infos = self.envs.reset(seed=self.seed + self.rank, options=reset_options)
         next_obs = torch.Tensor(next_obs).to(self.device)
-        next_done = torch.zeros(self.num_envs).to(self.device)
+        next_done = torch.zeros(self.num_envs_per_gpu).to(self.device)
         
         # Store initial infos for first action
         self.current_infos = infos
-        
-        # Verify info setup
-        if isinstance(infos, dict) and 'size_candidate' in infos and 'color_candidate' in infos:
-            print("Action masking initialized successfully")
-        
+
         for iteration in range(1, num_iterations + 1):
             # Annealing learning rate
             if self.config.training.anneal_lr:
                 frac = 1.0 - (iteration - 1.0) / num_iterations
-                lrnow = frac * self.config.training.learning_rate
-                self.optimizer.param_groups[0]["lr"] = lrnow
-            
+                lr_now = frac * self.config.training.learning_rate
+                self.optimizer.param_groups[0]["lr"] = lr_now
+
             # Collect rollouts
+            self.agent.eval()
             next_value = self.collect_rollouts(next_obs, next_done, iteration)
-            
+
             # Compute GAE
             advantages, returns = self.compute_gae(next_value)
             
-            # Update global step
-            global_step += batch_size
-            
-            # Update agent
+            # Train agent
+            self.agent.train()
             training_metrics = self.update_agent(advantages, returns, global_step)
             
+            # Update global step
+            global_step += total_batch_size
+
             # Logging
             if iteration % self.config.logging.log_interval == 0:
-                mean_reward = np.mean(self.episode_returns) if self.episode_returns else 0
-                mean_length = np.mean(self.episode_lengths) if self.episode_lengths else 0
-                success_rate = np.mean(self.success_rate) if self.success_rate else 0
-                sps = int(global_step / (time.time() - start_time))
+                # 1. Aggregate metrics from all processes
+                local_reward = np.mean(self.episode_returns) if self.episode_returns else 0
+                local_length = np.mean(self.episode_lengths) if self.episode_lengths else 0
+                local_success_rate = np.mean(self.success_rate) if self.success_rate else 0
                 
-                print(f"\nIteration {iteration}/{num_iterations}")
-                print(f"Global step: {global_step}")
-                print(f"Last return: {self.episode_returns[-1]:.3f}")
-                print(f"Mean reward (last {self.config.environment.num_envs} episodes): {mean_reward:.3f}")
-                print(f"Mean episode length: {mean_length:.1f}")
-                print(f"Success rate: {success_rate:.3f}")
-                print(f"SPS (global step을 롤아웃하고 업데이트까지 걸린 시간): {sps}")
-                print(f"Learning rate: {self.optimizer.param_groups[0]['lr']:.6f}")
+                metrics_tensor = torch.tensor([local_reward, local_length, local_success_rate], dtype=torch.float32, device=self.device)
+                dist.all_reduce(metrics_tensor, op=dist.ReduceOp.AVG)
                 
-                if training_metrics:
-                    print(f"Policy loss: {training_metrics['policy_loss']:.4f}")
-                    print(f"Value loss: {training_metrics['value_loss']:.4f}")
-                    print(f"Entropy loss: {training_metrics['entropy_loss']:.4f}")
-                    print(f"Explained variance: {training_metrics['explained_variance']:.4f}")
+                # Aggregate training_metrics dictionary
+                metrics_keys = sorted(training_metrics.keys())
+                local_metrics_values = torch.tensor([training_metrics[k] for k in metrics_keys], dtype=torch.float32, device=self.device)
+                dist.all_reduce(local_metrics_values, op=dist.ReduceOp.AVG)
+
+                if self.rank == 0:
+                    # 2. Log aggregated metrics on rank 0
+                    mean_reward = metrics_tensor[0].item()
+                    mean_length = metrics_tensor[1].item()
+                    success_rate = metrics_tensor[2].item()
+                    
+                    agg_training_metrics = {k: v.item() for k, v in zip(metrics_keys, local_metrics_values)}
+                    
+                    sps = int(global_step / (time.time() - start_time))
+                    lr_now = self.optimizer.param_groups[0]['lr']
+
+                    # --- Detailed Print Block ---
+                    print(f"\nIteration {iteration}/{num_iterations}")
+                    print(f"Global step: {global_step}")
+                    print(f"Global Mean reward: {mean_reward:.3f}")
+                    print(f"Global Mean episode length: {mean_length:.1f}")
+                    print(f"Global Success rate: {success_rate:.3f}")
+                    print(f"SPS: {sps}")
+                    print(f"Learning rate: {lr_now:.6f}")
+                    
+                    if agg_training_metrics:
+                        print(f"Policy loss: {agg_training_metrics['policy_loss']:.4f}")
+                        print(f"Value loss: {agg_training_metrics['value_loss']:.4f}")
+                        print(f"Entropy loss: {agg_training_metrics['entropy_loss']:.4f}")
+                        print(f"Explained variance: {agg_training_metrics['explained_variance']:.4f}")
+
+                    # --- Detailed WandB Log Block ---
+                    if self.config.logging.use_wandb:
+                        log_dict = {
+                            'charts/learning_rate': lr_now,
+                            'charts/episodic_return': mean_reward,
+                            'charts/episodic_length': mean_length,
+                            'charts/SPS': sps,
+                            'charts/success_rate': success_rate,
+                            'losses/policy_loss': agg_training_metrics['policy_loss'],
+                            'losses/value_loss': agg_training_metrics['value_loss'],
+                            'losses/entropy': agg_training_metrics['entropy_loss'],
+                            'losses/old_approx_kl': agg_training_metrics['old_approx_kl'],
+                            'losses/approx_kl': agg_training_metrics['approx_kl'],
+                            'losses/clipfrac': agg_training_metrics['clipfrac'],
+                            'losses/explained_variance': agg_training_metrics['explained_variance']
+                        }
+                        wandb.log(log_dict, step=global_step)
+                    
+                    # --- Detailed Tensorboard Log Block ---
+                    if self.tensorboard_writer:
+                        self.tensorboard_writer.add_scalar('charts/learning_rate', lr_now, global_step)
+                        self.tensorboard_writer.add_scalar('charts/episodic_return', mean_reward, global_step)
+                        self.tensorboard_writer.add_scalar('charts/episodic_length', mean_length, global_step)
+                        self.tensorboard_writer.add_scalar('charts/SPS', sps, global_step)
+                        self.tensorboard_writer.add_scalar('charts/success_rate', success_rate, global_step)
+                        self.tensorboard_writer.add_scalar('losses/policy_loss', agg_training_metrics['policy_loss'], global_step)
+                        self.tensorboard_writer.add_scalar('losses/value_loss', agg_training_metrics['value_loss'], global_step)
+                        self.tensorboard_writer.add_scalar('losses/entropy', agg_training_metrics['entropy_loss'], global_step)
+                        self.tensorboard_writer.add_scalar('losses/old_approx_kl', agg_training_metrics['old_approx_kl'], global_step)
+                        self.tensorboard_writer.add_scalar('losses/approx_kl', agg_training_metrics['approx_kl'], global_step)
+                        self.tensorboard_writer.add_scalar('losses/clipfrac', agg_training_metrics['clipfrac'], global_step)
+                        self.tensorboard_writer.add_scalar('losses/explained_variance', agg_training_metrics['explained_variance'], global_step)
+
+            # --- VISUALIZATION AND CHECKPOINTING (RANK 0 ONLY) ---
+            if self.rank == 0:
+                # Visualization
+                if iteration % self.config.logging.visualize_period == 0:
+                    self.visualize_grid(iteration, first=first_vis)
+                    first_vis = False
                 
-                # Log to wandb
-                if self.config.logging.use_wandb:
-                    log_dict = {
-                        'charts/learning_rate': self.optimizer.param_groups[0]['lr'],
-                        'charts/episodic_return': mean_reward,
-                        'charts/episodic_length': mean_length,
-                        'charts/SPS': sps,
-                        'losses/policy_loss': training_metrics['policy_loss'],
-                        'losses/value_loss': training_metrics['value_loss'],
-                        'losses/entropy': training_metrics['entropy_loss'],
-                        'losses/old_approx_kl': training_metrics['old_approx_kl'],
-                        'losses/approx_kl': training_metrics['approx_kl'],
-                        'losses/clipfrac': training_metrics['clipfrac'],
-                        'losses/explained_variance': training_metrics['explained_variance']
-                    }
-                    wandb.log(log_dict, step=global_step)
-                
-                # Log to tensorboard
-                if self.tensorboard_writer:
-                    self.tensorboard_writer.add_scalar('charts/learning_rate', self.optimizer.param_groups[0]['lr'], global_step)
-                    self.tensorboard_writer.add_scalar('charts/episodic_return', mean_reward, global_step)
-                    self.tensorboard_writer.add_scalar('charts/episodic_length', mean_length, global_step)
-                    self.tensorboard_writer.add_scalar('charts/SPS', sps, global_step)
-                    self.tensorboard_writer.add_scalar('losses/policy_loss', training_metrics['policy_loss'], global_step)
-                    self.tensorboard_writer.add_scalar('losses/value_loss', training_metrics['value_loss'], global_step)
-                    self.tensorboard_writer.add_scalar('losses/entropy', training_metrics['entropy_loss'], global_step)
-                    self.tensorboard_writer.add_scalar('losses/old_approx_kl', training_metrics['old_approx_kl'], global_step)
-                    self.tensorboard_writer.add_scalar('losses/approx_kl', training_metrics['approx_kl'], global_step)
-                    self.tensorboard_writer.add_scalar('losses/clipfrac', training_metrics['clipfrac'], global_step)
-                    self.tensorboard_writer.add_scalar('losses/explained_variance', training_metrics['explained_variance'], global_step)
+                # Save checkpoint
+                if iteration % self.config.logging.save_interval == 0 and iteration > 0:
+                    torch.save(self.agent.module.state_dict(), os.path.join(self.config.logging.save_dir, f'checkpoint_{iteration}.pth'))
+                    print(f"Checkpoint saved at iteration {iteration}")
+
+                    # Save best model based on aggregated reward
+                    # Note: mean_reward is only calculated on log intervals. We need to re-calculate for saving best model.
+                    current_agg_reward_tensor = torch.tensor([np.mean(self.episode_returns) if self.episode_returns else -float('inf')], dtype=torch.float32, device=self.device)
+                    dist.all_reduce(current_agg_reward_tensor, op=dist.ReduceOp.AVG)
+                    current_agg_reward = current_agg_reward_tensor.item()
+
+                    if current_agg_reward > best_mean_reward:
+                        best_mean_reward = current_agg_reward
+                        torch.save(self.agent.module.state_dict(), os.path.join(self.config.logging.save_dir, 'best_model.pth'))
+                        print(f"New best model saved! Global mean reward: {best_mean_reward:.3f}")
+
+        # --- FINALIZATION (RANK 0 ONLY) ---
+        if self.rank == 0:
+            print("Training completed!")
+            final_path = os.path.join(self.config.logging.save_dir, 'final_model.pth')
+            torch.save(self.agent.module.state_dict(), final_path)
+            print(f"Final model saved: {final_path}")
             
-            # Visualization
-            if iteration % self.config.logging.visualize_period == 0:
-                print(f"Creating grid visualization at iteration {iteration}...")
-                self.visualize_grid(iteration, first=first_vis)
-                first_vis = False
-            
-            # Save checkpoint
-            if iteration % self.config.logging.save_interval == 0 and iteration > 0:
-                checkpoint_path = os.path.join(self.config.logging.save_dir, f'checkpoint_{iteration}.pth')
-                torch.save({
-                    'agent_state_dict': self.agent.state_dict(),
-                    'optimizer_state_dict': self.optimizer.state_dict(),
-                    'iteration': iteration,
-                    'global_step': global_step,
-                    'config': self.config
-                }, checkpoint_path)
-                print(f"Checkpoint saved: {checkpoint_path}")
-                
-                # Save best model if performance improved
-                if mean_reward > best_mean_reward:
-                    best_mean_reward = mean_reward
-                    best_path = os.path.join(self.config.logging.save_dir, 'best_model.pth')
-                    torch.save({
-                        'agent_state_dict': self.agent.state_dict(),
-                        'optimizer_state_dict': self.optimizer.state_dict(),
-                        'iteration': iteration,
-                        'global_step': global_step,
-                        'config': self.config,
-                        'best_reward': best_mean_reward
-                    }, best_path)
-                    print(f"New best model saved! Mean reward: {best_mean_reward:.3f}")
+            if self.config.logging.use_wandb:
+                wandb.finish()
+            if self.tensorboard_writer:
+                self.tensorboard_writer.close()
         
-        print("Training completed!")
-        
-        # Final save
-        final_path = os.path.join(self.config.logging.save_dir, 'final_model.pth')
-        torch.save({
-            'agent_state_dict': self.agent.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
-            'iteration': num_iterations,
-            'global_step': global_step,
-            'config': self.config
-        }, final_path)
-        print(f"Final model saved: {final_path}")
-        
-        # Close loggers
-        if self.config.logging.use_wandb:
-            wandb.finish()
-        
-        if self.tensorboard_writer:
-            self.tensorboard_writer.close()
-        
+        # All processes must wait here before closing envs
+        dist.barrier()
         self.envs.close()
 
 
-@hydra.main(version_base=None, config_path="config", config_name="ppo_vector_env")
-def main(cfg: DictConfig) -> None:
-    """Main training function with Hydra configuration."""
-    print("Vectorized PPO Training configuration:")
-    print(OmegaConf.to_yaml(cfg))
+def train_multi_gpu(rank: int, num_devices: int, cfg: DictConfig) -> None:
+    """A single process's training entry point."""
+    # DDP environment setup
+    os.environ['MASTER_ADDR'] = 'localhost'
+    os.environ['MASTER_PORT'] = '12355'
+    torch.cuda.set_device(rank)
+    dist.init_process_group("nccl", rank=rank, world_size=num_devices)
     
-    # Set random seeds for reproducibility
-    random.seed(cfg.environment.seed)
-    np.random.seed(cfg.environment.seed)
+    # Isolate printing to the main process
+    if rank == 0:
+        print("Vectorized PPO Training configuration:")
+        print(OmegaConf.to_yaml(cfg))
+    
+    # Set a common seed for model initialization (important for DDP)
     torch.manual_seed(cfg.environment.seed)
     torch.backends.cudnn.deterministic = True
+
+    # Set different seeds for environment randomization
+    random.seed(cfg.environment.seed + rank)
+    np.random.seed(cfg.environment.seed + rank)
     
     # Create trainer and start training
-    trainer = ArcAgiVectorizedTrainer(cfg)
+    trainer = ArcAgiVectorizedTrainer(cfg, rank, num_devices)
     trainer.train()
+
+    # Cleanup
+    dist.destroy_process_group()
+
+@hydra.main(version_base=None, config_path="config", config_name="ppo_vector_env")
+def main(cfg: DictConfig) -> None:
+    """Spawns DDP training processes."""
+    num_devices = torch.cuda.device_count()
+    # Ensure num_devices is not zero
+    if num_devices == 0:
+        print("No GPUs detected. DDP training requires at least one GPU.")
+        return
+        
+    mp.spawn(train_multi_gpu,
+             args=(num_devices, cfg),
+             nprocs=num_devices,
+             join=True)
 
 
 if __name__ == '__main__':
