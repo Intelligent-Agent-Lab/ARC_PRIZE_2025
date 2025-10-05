@@ -189,8 +189,8 @@ def _generate_train_xyxy_dataset(train_pairs: List[np.ndarray]) -> Tuple:
             # target_y: 마지막 Y (90: 열)
             target_y = xyxy_pair[:, 90:]
             
-            # shape 마스크 (11이 아닌 영역 = 1)
-            active_shape = (target_y != 11).astype(np.int8)  # int8로 메모리 절약
+            # shape 마스크 (10이 아닌 영역 = 1)
+            active_shape = (target_y < 10).astype(np.int8)  # int8로 메모리 절약
             
             # color one-hot vector
             unique_colors = np.unique(target_y)
@@ -238,7 +238,7 @@ def _generate_test_xyxy_dataset(train_pairs: List[np.ndarray],
             target_y = test_y_parts[j]
             
             # Shape mask
-            active_shape = (target_y != 11).astype(np.int8)
+            active_shape = (target_y < 10).astype(np.int8)
             
             # Color one-hot (안전하게 처리)
             unique_colors = np.unique(target_y)
