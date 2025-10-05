@@ -17,8 +17,8 @@ class ActiveShapeColorOntHot:
     color: 길이가 10인 one_hot vector
             사용하는 색만 1로 결정
     '''
-    shape: Int[Array, 'H W'] 
-    color: Int[Array, 'num_colors']
+    shape: Int[Array, '30 30'] 
+    color: Int[Array, '10']
 
 
 def generate_meta_dataset(challenges: Dict[str, Any],
@@ -189,7 +189,7 @@ def _generate_train_xyxy_dataset(train_pairs: List[np.ndarray]) -> Tuple:
             target_y = xyxy_pair[:, 90:]
             
             # shape 마스크 (10이 아닌 영역 = 1)
-            active_shape = (target_y != 10).astype(np.int8)  # int8로 메모리 절약
+            active_shape = (target_y < 10).astype(np.int8)  # int8로 메모리 절약
             
             # color one-hot vector
             unique_colors = np.unique(target_y)
@@ -237,7 +237,7 @@ def _generate_test_xyxy_dataset(train_pairs: List[np.ndarray],
             target_y = test_y_parts[j]
             
             # Shape mask
-            active_shape = (target_y != 11).astype(np.int8)
+            active_shape = (target_y < 10).astype(np.int8)
             
             # Color one-hot (안전하게 처리)
             unique_colors = np.unique(target_y)
@@ -277,58 +277,6 @@ def _generate_test_xyx_dataset(train_pairs: List[np.ndarray],
             test_xyx_pairs.append(xyx_pair)
             
     return test_xyx_pairs
-
-
-# def _generate_train_xyxy_dataset(train_pairs: List[np.ndarray]
-#                                       ) -> :
-#     """
-#     Generate XYXY pairs from training data with corresponding shape color info.
-    
-#     Args:
-#         train_pairs: List of training pairs (XY format)
-        
-#     Returns:
-#         Tuple of (xyxyxy_pairs, corresponding_shape_color_infos)
-#     """
-#     if not train_pairs or not test_pairs:
-#         return [], []
-#     train_xyxy_pairs = []
-#     corresponding_shape_colors = []
-#     for p in permutations(train_pairs, 2):
-#         xyxy_pair = np.hstack(p)
-#         train_xyxy_pairs.append(xyxy_pair)
-#         target_y = xyxy_pair[:, 90:120]
-#         active_shape = (target_y != 11).astype(int)
-#         active_color = np.unique(target_y)
-#         ont_hot_color = np.zeros(10, dtype=int)
-#         ont_hot_color[active_color] = 1
-#         shape_color_info = ActiveShapeColorOntHot(
-#                             shape=active_shape,
-#                             color=ont_hot_color,)
-#         corresponding_shape_colors.append(shape_color_info)
-    
-#     return train_xyxy_pairs, corresponding_shape_colors
-    
-    
-# def _generate_test_xyxy_dataset(train_pairs: List[np.ndarray],
-#                                      test_pairs: List[np.ndarray]):
-#     if not train_pairs or not test_pairs:
-#         return [], []
-#     test_xyxy_pairs = []
-#     corresponding_shape_colors = []
-#     for p in product(train_pairs, test_pairs):
-#         xyxy_pair = np.hstack(p)
-#         test_xyxy_pairs.append(xyxy_pair)
-#         target_y = xyxy_pair[:, 90:]
-#         active_shape = (target_y != 11).astype(int)
-#         active_color = np.unique(target_y)
-#         ont_hot_color = np.zeros(10, dtype=int)
-#         ont_hot_color[active_color] = 1
-#         shape_color_info = ActiveShapeColorOntHot(
-#                             shape=active_shape,
-#                             color=ont_hot_color,)
-#         corresponding_shape_colors.append(shape_color_info)
-#     return test_xyxy_pairs, corresponding_shape_colors
 
 
 def _pad_grid(grid: np.ndarray, target_shape: Tuple[int, int], pad_val: int) -> np.ndarray:
@@ -476,7 +424,9 @@ if __name__ == "__main__":
     
 
     # %%
-    len(meta_train_dataset['794b24be']['train_info'])
-    meta_train_dataset['794b24be']['train_info'][0]
+    print(meta_train_dataset['794b24be']['train_info'][0])
+    # %%
+    print(meta_train_dataset['794b24be']['test_info'][0])
+    # %%
     
 
