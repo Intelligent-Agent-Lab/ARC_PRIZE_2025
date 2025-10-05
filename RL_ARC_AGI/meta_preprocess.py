@@ -29,52 +29,86 @@ def generate_meta_dataset(challenges: Dict[str, Any],
     PAD_VAL = 10
     meta_dataset = dict()
     
-    # 1. meta-train dataset
+    # 1. train tasks (for adaptation)
     # train_challenges 또는 eval_challenges 내의 train_input_ouput_pair에 대해서
     # 각 task 별로 XYXY를 순열로 구성하여 nP2 개 만큼의 XYXY pair들을 생성
     
-    # 2. meta-test datset 생성
+    # 2. test tasks (for evaluation)
     # train_input_output, test_input_output으로 XYXY 생성
     # 각 task 별로 XYXY를 product로 구성하여
     # num_train_input_output_pairs X num_test_input_output_pairs
     # 개수만큼 pair들을 생성
     
-    
-    for task_id, task_data in challenges.items():
-        meta_dataset[task_id] = dict()
-        
-        task_sol = solutions[task_id]
-        
-        # train_XY pair padding
-        train_pairs_img = _pad_train_xy_pairs(
-            task_data.get('train', []), 
-            MAX_SHAPE, 
-            PAD_VAL
-        )
-        
-        # test_XY pair padding
-        test_inputs = task_data.get('test', [])
-        test_pairs_img = _pad_test_xy_pairs(
-            test_inputs, 
-            task_sol, 
-            MAX_SHAPE, 
-            PAD_VAL
-        )
-        
-        # generate meta-train XYXY dataset
-        meta_train_xyxy_pairs, meta_train_shape_colors = _generate_meta_train_xyxy_dataset(
-                    train_pairs_img
-                )
-        
-        meta_dataset[task_id]['meta_train_data'] = meta_train_xyxy_pairs
-        meta_dataset[task_id]['meta_train_info'] = meta_train_shape_colors
-        
-        # generate meta-test XYXY dataset
-        meta_test_xyxy_pairs, meta_test_shape_colors = _generate_meta_test_xyxy_dataset(
-                    train_pairs_img, test_pairs_img
-                )
-        meta_dataset[task_id]['meta_test_data'] = meta_test_xyxy_pairs
-        meta_dataset[task_id]['meta_test_info'] = meta_test_shape_colors
+    # generate meta-train or meta-evaluation dataset
+    if solutions is not None:
+        for task_id, task_data in challenges.items():
+            meta_dataset[task_id] = dict()
+            
+            task_sol = solutions[task_id]
+            
+            # train_XY pair padding
+            train_pairs_img = _pad_train_xy_pairs(
+                task_data.get('train', []), 
+                MAX_SHAPE, 
+                PAD_VAL
+            )
+            
+            # test_XY pair padding
+            test_pairs_img = _pad_test_xy_pairs(
+                task_data.get('test', []),
+                task_sol, 
+                MAX_SHAPE, 
+                PAD_VAL
+            )
+            
+            # generate meta-train XYXY dataset
+            train_xyxy_pairs, train_shape_colors = _generate_train_xyxy_dataset(
+                        train_pairs_img
+                    )
+            
+            meta_dataset[task_id]['train_data'] = train_xyxy_pairs
+            meta_dataset[task_id]['train_info'] = train_shape_colors
+            
+            # generate meta-test XYXY dataset
+            test_xyxy_pairs, test_shape_colors = _generate_test_xyxy_dataset(
+                        train_pairs_img, test_pairs_img
+                    )
+            meta_dataset[task_id]['test_data'] = test_xyxy_pairs
+            meta_dataset[task_id]['test_info'] = test_shape_colors
+    # generate meta-test dataset
+    else: 
+        for task_id, task_data in challenges.items():
+            meta_dataset[task_id] = dict()
+            task_sol = None
+            # train_XY pair padding
+            train_pairs_img = _pad_train_xy_pairs(
+                task_data.get('train', []), 
+                MAX_SHAPE, 
+                PAD_VAL
+            )
+            
+            # test_XY pair padding
+            test_inputs = task_data.get('test', [])
+            test_pairs_img = _pad_test_xy_pairs(
+                test_inputs, 
+                task_sol, 
+                MAX_SHAPE, 
+                PAD_VAL
+            )
+            
+            # generate meta-train XYXY dataset
+            train_xyxy_pairs, train_shape_colors = _generate_train_xyxy_dataset(
+                        train_pairs_img
+                    )
+            
+            meta_dataset[task_id]['train_data'] = train_xyxy_pairs
+            meta_dataset[task_id]['train_info'] = train_shape_colors
+            
+            # generate meta-test XYX dataset
+            test_xyx_pairs = _generate_test_xyx_dataset(
+                        train_pairs_img, test_pairs_img
+                    )
+            meta_dataset[task_id]['test_data'] = test_xyx_pairs
 
     return meta_dataset
     
@@ -105,31 +139,43 @@ def _pad_test_xy_pairs(test_inputs: List[Dict],
                        pad_val: int,
                        ) -> List[np.ndarray]:
     """Process test pairs with their solutions."""
-    img_test_pairs = []
-    for test_input, solution in zip(test_inputs, solutions):
-        input_grid = np.array(test_input['input'])
-        output_grid = np.array(solution)
-        
-        # Pad grids
-        padded_input = _pad_grid(input_grid, max_shape, pad_val)
-        padded_output = _pad_grid(output_grid, max_shape, pad_val)
-        
-        # Image format
-        xy_img = np.concatenate([padded_input, padded_output], axis=1)
-        img_test_pairs.append(xy_img)
+    if solutions is not None:
+        img_test_pairs = []
+        for test_input, solution in zip(test_inputs, solutions):
+            input_grid = np.array(test_input['input'])
+            output_grid = np.array(solution)
+            
+            # Pad grids
+            padded_input = _pad_grid(input_grid, max_shape, pad_val)
+            padded_output = _pad_grid(output_grid, max_shape, pad_val)
+            
+            # Image format
+            xy_img = np.concatenate([padded_input, padded_output], axis=1)
+            img_test_pairs.append(xy_img)
+    else:
+        img_test_pairs = []
+        for test_input in test_inputs:
+            input_grid = np.array(test_input['input'])
+            
+            # Pad grids
+            padded_input = _pad_grid(input_grid, max_shape, pad_val)
+            padded_output = np.ones_like(padded_input) * 11
+            # Image format
+            xy_img = np.concatenate([padded_input, padded_output], axis=1)
+            img_test_pairs.append(xy_img)
         
     return img_test_pairs
 
 
-def _generate_meta_train_xyxy_dataset(train_pairs: List[np.ndarray]) -> Tuple:
+def _generate_train_xyxy_dataset(train_pairs: List[np.ndarray]) -> Tuple:
     if not train_pairs:
         return [], []
     
     n = len(train_pairs)
     train_pairs_array = np.array(train_pairs)  # (n, 30, 60)
     
-    meta_train_xyxy_pairs = []
-    meta_train_shape_colors = []
+    train_xyxy_pairs = []
+    train_shape_colors = []
     
     for i in range(n):
         for j in range(n):
@@ -138,7 +184,7 @@ def _generate_meta_train_xyxy_dataset(train_pairs: List[np.ndarray]) -> Tuple:
             
             # 직접 concatenate
             xyxy_pair = np.concatenate([train_pairs_array[i], train_pairs_array[j]], axis=1)
-            meta_train_xyxy_pairs.append(xyxy_pair)
+            train_xyxy_pairs.append(xyxy_pair)
             
             # target_y: 마지막 Y (90: 열)
             target_y = xyxy_pair[:, 90:]
@@ -157,12 +203,12 @@ def _generate_meta_train_xyxy_dataset(train_pairs: List[np.ndarray]) -> Tuple:
                 shape=active_shape,
                 color=ont_hot_color
             )
-            meta_train_shape_colors.append(shape_color_info)
+            train_shape_colors.append(shape_color_info)
     
-    return meta_train_xyxy_pairs, meta_train_shape_colors
+    return train_xyxy_pairs, train_shape_colors
 
 
-def _generate_meta_test_xyxy_dataset(train_pairs: List[np.ndarray],
+def _generate_test_xyxy_dataset(train_pairs: List[np.ndarray],
                                                test_pairs: List[np.ndarray]) -> Tuple:
     """
     Highly optimized version using numpy arrays.
@@ -176,7 +222,7 @@ def _generate_meta_test_xyxy_dataset(train_pairs: List[np.ndarray],
     
     n_train, n_test = len(train_pairs), len(test_pairs)
     
-    meta_test_xyxy_pairs = []
+    test_xyxy_pairs = []
     corresponding_shape_colors = []
     
     # 각 test pair의 Y 부분만 미리 추출 (중복 계산 방지)
@@ -186,7 +232,7 @@ def _generate_meta_test_xyxy_dataset(train_pairs: List[np.ndarray],
         for j in range(n_test):
             # XYXY 생성
             xyxy_pair = np.concatenate([train_array[i], test_array[j]], axis=1)
-            meta_test_xyxy_pairs.append(xyxy_pair)
+            test_xyxy_pairs.append(xyxy_pair)
             
             # Target Y (미리 추출한 것 사용)
             target_y = test_y_parts[j]
@@ -207,10 +253,34 @@ def _generate_meta_test_xyxy_dataset(train_pairs: List[np.ndarray],
             )
             corresponding_shape_colors.append(shape_color_info)
     
-    return meta_test_xyxy_pairs, corresponding_shape_colors
+    return test_xyxy_pairs, corresponding_shape_colors
+
+def _generate_test_xyx_dataset(train_pairs: List[np.ndarray],
+                                               test_pairs: List[np.ndarray]) -> Tuple:
+    """
+    Highly optimized version using numpy arrays.
+    """
+    if not train_pairs or not test_pairs:
+        return [], []
+    
+    # numpy 배열로 변환 (반복 접근 시 성능 향상)
+    train_array = np.array(train_pairs)  # (n_train, 30, 60)
+    test_array = np.array(test_pairs)    # (n_test, 30, 60)
+    
+    n_train, n_test = len(train_pairs), len(test_pairs)
+    
+    test_xyx_pairs = []
+    
+    for i in range(n_train):
+        for j in range(n_test):
+            # XYX 생성
+            xyx_pair = np.concatenate([train_array[i], test_array[j]], axis=1)
+            test_xyx_pairs.append(xyx_pair)
+            
+    return test_xyx_pairs
 
 
-# def _generate_meta_train_xyxy_dataset(train_pairs: List[np.ndarray]
+# def _generate_train_xyxy_dataset(train_pairs: List[np.ndarray]
 #                                       ) -> :
 #     """
 #     Generate XYXY pairs from training data with corresponding shape color info.
@@ -241,15 +311,15 @@ def _generate_meta_test_xyxy_dataset(train_pairs: List[np.ndarray],
 #     return train_xyxy_pairs, corresponding_shape_colors
     
     
-# def _generate_meta_test_xyxy_dataset(train_pairs: List[np.ndarray],
+# def _generate_test_xyxy_dataset(train_pairs: List[np.ndarray],
 #                                      test_pairs: List[np.ndarray]):
 #     if not train_pairs or not test_pairs:
 #         return [], []
-#     meta_test_xyxy_pairs = []
+#     test_xyxy_pairs = []
 #     corresponding_shape_colors = []
 #     for p in product(train_pairs, test_pairs):
 #         xyxy_pair = np.hstack(p)
-#         meta_test_xyxy_pairs.append(xyxy_pair)
+#         test_xyxy_pairs.append(xyxy_pair)
 #         target_y = xyxy_pair[:, 90:]
 #         active_shape = (target_y != 11).astype(int)
 #         active_color = np.unique(target_y)
@@ -259,7 +329,7 @@ def _generate_meta_test_xyxy_dataset(train_pairs: List[np.ndarray],
 #                             shape=active_shape,
 #                             color=ont_hot_color,)
 #         corresponding_shape_colors.append(shape_color_info)
-#     return meta_test_xyxy_pairs, corresponding_shape_colors
+#     return test_xyxy_pairs, corresponding_shape_colors
 
 
 def _pad_grid(grid: np.ndarray, target_shape: Tuple[int, int], pad_val: int) -> np.ndarray:
@@ -350,16 +420,60 @@ if __name__ == "__main__":
     print(min_test_pair_id)
 
     # %%
-    meta_dataset = generate_meta_dataset(training_challenges,
-                                                                training_solutions)
+    print(len(training_challenges['794b24be']['train']))
     # %%
-    meta_dataset['794b24be']['meta_train_data']
-    print(len(meta_dataset['794b24be']['meta_train_data']))
+    print(len(training_challenges['794b24be']['test']))
+    
     # %%
-    print(len(meta_dataset['794b24be']['meta_train_info']))
+    meta_train_dataset = generate_meta_dataset(training_challenges, training_solutions)
+    meta_eval_dataset = generate_meta_dataset(evaluation_challenges, evaluation_solutions)
+    meta_test_dataset = generate_meta_dataset(test_challenges, None)
     # %%
-    meta_dataset['794b24be']['meta_test_data']
-    print(len(meta_dataset['794b24be']['meta_test_data']))
+    meta_train_dataset['794b24be']['train_data']
+    print(len(meta_train_dataset['794b24be']['train_data']))
     # %%
-    meta_dataset['794b24be']['meta_test_info']
-    print(len(meta_dataset['794b24be']['meta_test_info']))
+    print(len(meta_train_dataset['794b24be']['train_info']))
+    # %%
+    meta_train_dataset['794b24be']['test_data']
+    print(len(meta_train_dataset['794b24be']['test_data']))
+    # %%
+    meta_train_dataset['794b24be']['test_info']
+    print(len(meta_train_dataset['794b24be']['test_info']))
+
+    # %%
+    from visualize_arc_agi import ArcAgiVisualizer
+    visualizer = ArcAgiVisualizer()
+    # %%
+    task_id = '794b24be'
+    pair_idx = 1
+    meta_train_xyxy_ex = meta_train_dataset[task_id]['train_data'][pair_idx]
+    meta_train_xyxy_ex
+    visualizer.plot_target_grid(meta_train_xyxy_ex, task_id, pair_idx)
+    visualizer.plot_one_task(training_challenges,
+                             training_solutions,
+                             task_id, 
+                             mode='train',
+                            )
+    visualizer.plot_padded_task(meta_train_dataset,
+                                task_id,
+                                'train',
+                                pair_idx,
+                                )
+
+    # %%
+    meta_test_task_id = list(meta_test_dataset.keys())[0]
+    print(meta_test_task_id)
+    # %%
+    visualizer.plot_padded_task(meta_test_dataset,
+                                meta_test_task_id,
+                                'test',
+                                pair_idx,
+                                )
+    # %%
+    print(len(test_challenges[meta_test_task_id]['train']))
+    print(len(test_challenges[meta_test_task_id]['test']))
+    print(len(meta_test_dataset[meta_test_task_id]['train_data']))
+    print(len(meta_test_dataset[meta_test_task_id]['test_data']))
+    
+
+# %%
