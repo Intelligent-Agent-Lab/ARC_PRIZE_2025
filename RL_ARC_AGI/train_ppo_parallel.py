@@ -310,17 +310,21 @@ class ArcAgiVectorizedTrainer:
             print(f"Single action space: {self.envs.single_action_space}")
         
     def setup_agent(self):
-        """Setup the DDP agent for the current process (rank)."""
+        """Setup the agent for the current process (rank)."""
         self.device = torch.device(f"cuda:{self.rank}")
 
         # Create agent and move to the correct device
         agent = Agent(self.config).to(self.device)
-        # Wrap the agent with DDP
-        self.agent = DDP(agent, device_ids=[self.rank])
 
-        # Create optimizer for the DDP-wrapped model
+        # Wrap with DDP only for multi-GPU
+        if self.num_devices > 1:
+            self.agent = DDP(agent, device_ids=[self.rank])
+        else:
+            self.agent = agent
+
+        # Create optimizer
         self.optimizer = optim.Adam(
-            self.agent.parameters(),  # Use .module to access original model
+            self.agent.parameters(),
             lr=self.config.training.learning_rate,
             eps=1e-5
         )
@@ -446,8 +450,9 @@ class ArcAgiVectorizedTrainer:
                 # Use current infos for action masking (from previous step or reset)
                 current_infos = getattr(self, 'current_infos', None)
                 if current_infos is not None:
-                    # Call the mask creation method from the underlying module
-                    action_mask = self.agent.module._create_action_mask(next_obs, current_infos)
+                    # Call the mask creation method (handle both DDP and non-DDP)
+                    agent_module = self.agent.module if hasattr(self.agent, 'module') else self.agent
+                    action_mask = agent_module._create_action_mask(next_obs, current_infos)
                     action_logits = action_logits + action_mask
                 else:
                     print(f"WARNING: current_infos is None at step {step}!")
@@ -600,8 +605,11 @@ class ArcAgiVectorizedTrainer:
                 if is_sync_step:
                     loss.backward()
                 else:
-                    # Accumulation step, don't sync
-                    with self.agent.no_sync():
+                    # Accumulation step, don't sync (only for DDP)
+                    if hasattr(self.agent, 'no_sync'):
+                        with self.agent.no_sync():
+                            loss.backward()
+                    else:
                         loss.backward()
                 
                 if is_sync_step:
@@ -686,14 +694,21 @@ class ArcAgiVectorizedTrainer:
                 local_reward = np.mean(self.episode_returns) if self.episode_returns else 0
                 local_length = np.mean(self.episode_lengths) if self.episode_lengths else 0
                 local_success_rate = np.mean(self.success_rate) if self.success_rate else 0
-                
-                metrics_tensor = torch.tensor([local_reward, local_length, local_success_rate], dtype=torch.float32, device=self.device)
-                dist.all_reduce(metrics_tensor, op=dist.ReduceOp.AVG)
-                
-                # Aggregate training_metrics dictionary
-                metrics_keys = sorted(training_metrics.keys())
-                local_metrics_values = torch.tensor([training_metrics[k] for k in metrics_keys], dtype=torch.float32, device=self.device)
-                dist.all_reduce(local_metrics_values, op=dist.ReduceOp.AVG)
+
+                if self.num_devices > 1:
+                    # Multi-GPU: aggregate across processes
+                    metrics_tensor = torch.tensor([local_reward, local_length, local_success_rate], dtype=torch.float32, device=self.device)
+                    dist.all_reduce(metrics_tensor, op=dist.ReduceOp.AVG)
+
+                    # Aggregate training_metrics dictionary
+                    metrics_keys = sorted(training_metrics.keys())
+                    local_metrics_values = torch.tensor([training_metrics[k] for k in metrics_keys], dtype=torch.float32, device=self.device)
+                    dist.all_reduce(local_metrics_values, op=dist.ReduceOp.AVG)
+                else:
+                    # Single GPU: use local metrics directly
+                    metrics_tensor = torch.tensor([local_reward, local_length, local_success_rate], dtype=torch.float32, device=self.device)
+                    metrics_keys = sorted(training_metrics.keys())
+                    local_metrics_values = torch.tensor([training_metrics[k] for k in metrics_keys], dtype=torch.float32, device=self.device)
 
                 if self.rank == 0:
                     # 2. Log aggregated metrics on rank 0
@@ -763,44 +778,55 @@ class ArcAgiVectorizedTrainer:
                 
                 # Save checkpoint
                 if iteration % self.config.logging.save_interval == 0 and iteration > 0:
-                    torch.save(self.agent.module.state_dict(), os.path.join(self.config.logging.save_dir, f'checkpoint_{iteration}.pth'))
+                    # Get the correct model state_dict (handle both DDP and non-DDP)
+                    model_state = self.agent.module.state_dict() if hasattr(self.agent, 'module') else self.agent.state_dict()
+                    torch.save(model_state, os.path.join(self.config.logging.save_dir, f'checkpoint_{iteration}.pth'))
                     print(f"Checkpoint saved at iteration {iteration}")
 
                     # Save best model based on aggregated reward
-                    # Note: mean_reward is only calculated on log intervals. We need to re-calculate for saving best model.
                     current_agg_reward_tensor = torch.tensor([np.mean(self.episode_returns) if self.episode_returns else -float('inf')], dtype=torch.float32, device=self.device)
-                    dist.all_reduce(current_agg_reward_tensor, op=dist.ReduceOp.AVG)
+
+                    if self.num_devices > 1:
+                        dist.all_reduce(current_agg_reward_tensor, op=dist.ReduceOp.AVG)
+
                     current_agg_reward = current_agg_reward_tensor.item()
 
                     if current_agg_reward > best_mean_reward:
                         best_mean_reward = current_agg_reward
-                        torch.save(self.agent.module.state_dict(), os.path.join(self.config.logging.save_dir, 'best_model.pth'))
+                        torch.save(model_state, os.path.join(self.config.logging.save_dir, 'best_model.pth'))
                         print(f"New best model saved! Global mean reward: {best_mean_reward:.3f}")
 
         # --- FINALIZATION (RANK 0 ONLY) ---
         if self.rank == 0:
             print("Training completed!")
             final_path = os.path.join(self.config.logging.save_dir, 'final_model.pth')
-            torch.save(self.agent.module.state_dict(), final_path)
+            model_state = self.agent.module.state_dict() if hasattr(self.agent, 'module') else self.agent.state_dict()
+            torch.save(model_state, final_path)
             print(f"Final model saved: {final_path}")
-            
+
             if self.config.logging.use_wandb:
                 wandb.finish()
             if self.tensorboard_writer:
                 self.tensorboard_writer.close()
-        
-        # All processes must wait here before closing envs
-        dist.barrier()
+
+        # All processes must wait here before closing envs (only for multi-GPU)
+        if self.num_devices > 1:
+            dist.barrier()
         self.envs.close()
 
 
 def train_multi_gpu(rank: int, num_devices: int, cfg: DictConfig) -> None:
     """A single process's training entry point."""
-    # DDP environment setup
-    os.environ['MASTER_ADDR'] = 'localhost'
-    os.environ['MASTER_PORT'] = '12355'
-    torch.cuda.set_device(rank)
-    dist.init_process_group("nccl", rank=rank, world_size=num_devices)
+    # Skip DDP initialization for single GPU mode
+    if num_devices > 1:
+        # DDP environment setup for multi-GPU
+        os.environ['MASTER_ADDR'] = 'localhost'
+        os.environ['MASTER_PORT'] = '12355'
+        torch.cuda.set_device(rank)
+        dist.init_process_group("nccl", rank=rank, world_size=num_devices)
+    else:
+        # Single GPU setup
+        torch.cuda.set_device(0)
     
     # Isolate printing to the main process
     if rank == 0:
@@ -819,22 +845,33 @@ def train_multi_gpu(rank: int, num_devices: int, cfg: DictConfig) -> None:
     trainer = ArcAgiVectorizedTrainer(cfg, rank, num_devices)
     trainer.train()
 
-    # Cleanup
-    dist.destroy_process_group()
+    # Cleanup (only for multi-GPU)
+    if num_devices > 1:
+        dist.destroy_process_group()
 
 @hydra.main(version_base=None, config_path="config", config_name="ppo_vector_env")
 def main(cfg: DictConfig) -> None:
-    """Spawns DDP training processes."""
+    """Spawns DDP training processes or runs single GPU on Windows."""
     num_devices = torch.cuda.device_count()
     # Ensure num_devices is not zero
     if num_devices == 0:
-        print("No GPUs detected. DDP training requires at least one GPU.")
+        print("No GPUs detected. Training requires at least one GPU.")
         return
-        
-    mp.spawn(train_multi_gpu,
-             args=(num_devices, cfg),
-             nprocs=num_devices,
-             join=True)
+
+    # Use single GPU on Windows, multi GPU on Linux
+    if not sys.platform.startswith("linux"):
+        print("Windows detected - using single GPU mode")
+        num_devices = 1
+
+    if num_devices == 1:
+        # Single GPU mode - no multiprocessing
+        train_multi_gpu(0, 1, cfg)
+    else:
+        # Multi GPU mode - use multiprocessing
+        mp.spawn(train_multi_gpu,
+                 args=(num_devices, cfg),
+                 nprocs=num_devices,
+                 join=True)
 
 
 if __name__ == '__main__':
