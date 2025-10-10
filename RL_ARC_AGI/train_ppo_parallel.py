@@ -482,13 +482,17 @@ class ArcAgiVectorizedTrainer:
             self.current_episode_returns += reward
             self.current_episode_lengths += 1
             
+            # Check for success based on step reward (reward == 1.0 means puzzle completed)
+            step_success = (reward == 1.0)
+
             # Log episode statistics when episodes end
             for i in range(self.num_envs_per_gpu):
                 if terminations[i] or truncations[i]:
                     # Episode ended - log stats
                     self.episode_returns.append(self.current_episode_returns[i])
                     self.episode_lengths.append(self.current_episode_lengths[i])
-                    self.success_rate.append(1.0 if self.current_episode_returns[i] > 10.0 else 0.0)
+                    # Success is determined by whether this step had reward == 1.0 (puzzle completed)
+                    self.success_rate.append(1.0 if step_success[i] else 0.0)
 
                     # Reset tracking for this environment
                     self.current_episode_returns[i] = 0.0
