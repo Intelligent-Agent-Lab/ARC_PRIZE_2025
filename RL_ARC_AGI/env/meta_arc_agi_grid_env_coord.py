@@ -17,7 +17,7 @@ from gymnax.environments import environment
 from matplotlib import colors
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap, Normalize
-from meta_preprocess import ActiveShapeColorOntHot, \
+from env.meta_preprocess import ActiveShapeColorOntHot, \
                             generate_meta_dataset, \
                             load_challenges_and_solutions
 

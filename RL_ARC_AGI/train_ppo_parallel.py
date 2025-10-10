@@ -22,12 +22,12 @@ from torch.utils.tensorboard import SummaryWriter
 from torch.distributions.categorical import Categorical
 from network.mlp import ActorCritic_MLP
 from network.vit import ActorCritic_ViT
-from arc_agi_grid_env_coord import cmap
+from env.arc_agi_grid_env_coord import cmap
 # Add current directory to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Import our modules
-from arc_agi_grid_env_coord import ArcAgiGridEnvCoord, create_arc_env_coord, \
+from env.arc_agi_grid_env_coord import ArcAgiGridEnvCoord, create_arc_env_coord, \
                                     action_converter, vectorized_action_converter, \
                                     load_challenges_and_solutions, \
                                     preprocess_data

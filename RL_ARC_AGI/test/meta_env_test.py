@@ -1,11 +1,11 @@
 # %%
-from meta_arc_agi_grid_env_coord import MetaArcAgiGridEnvCoord, load_challenges_and_solutions
+from env.meta_arc_agi_grid_env_coord import MetaArcAgiGridEnvCoord, load_challenges_and_solutions
 # %%
-training_challenges_json = "../datasets/arc-agi_training_challenges.json"
-training_solutions_json = "../datasets/arc-agi_training_solutions.json"
-evaluation_challenges_json = "../datasets/arc-agi_evaluation_challenges.json"
-evaluation_solutions_json = "../datasets/arc-agi_evaluation_solutions.json"
-test_challenges_json = "../datasets/arc-agi_test_challenges.json"
+training_challenges_json = "../../datasets/arc-agi_training_challenges.json"
+training_solutions_json = "../../datasets/arc-agi_training_solutions.json"
+evaluation_challenges_json = "../../datasets/arc-agi_evaluation_challenges.json"
+evaluation_solutions_json = "../../datasets/arc-agi_evaluation_solutions.json"
+test_challenges_json = "../../datasets/arc-agi_test_challenges.json"
 
 training_challenges, training_solutions, evaluation_challenges, \
 evaluation_solutions, test_challenges = load_challenges_and_solutions(
@@ -16,7 +16,7 @@ evaluation_solutions, test_challenges = load_challenges_and_solutions(
                                         test_challenges_json,
                                     )
 # %%
-from meta_preprocess import generate_meta_dataset
+from env.meta_preprocess import generate_meta_dataset
 meta_train_dataset = generate_meta_dataset(training_challenges, training_solutions)
 meta_eval_dataset = generate_meta_dataset(evaluation_challenges, evaluation_solutions)
 meta_test_dataset = generate_meta_dataset(test_challenges, None)
@@ -34,7 +34,7 @@ options = {'mode': 'meta_train',
 
 obs, info = env.reset(seed, options)
 # %%
-from visualize_arc_agi import ArcAgiVisualizer
+from env.visualize_arc_agi import ArcAgiVisualizer
 v = ArcAgiVisualizer()
 
 # %%
@@ -49,7 +49,7 @@ test_sol
 v.plot_target_grid(env._target_grid_img, '794b24be', 0)
 
 # %%
-from meta_arc_agi_grid_env_coord import convert_dict_to_int, convert_int_to_dict
+from env.meta_arc_agi_grid_env_coord import convert_dict_to_int, convert_int_to_dict
 import numpy as np 
 coord_list = np.where(env.active_shape == 1)
 coord_list
