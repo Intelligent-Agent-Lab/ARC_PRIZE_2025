@@ -14,6 +14,13 @@ import random
 from matplotlib.colors import ListedColormap, Normalize
 import torch 
 from dataclasses import dataclass
+from env.utils import convert_int_to_dict, \
+                                    convert_dict_to_int, \
+                                        vectorized_convert_dict_to_int,\
+                                            vectorized_convert_int_to_dict, \
+                                                randomize_part_of_solution
+                                                
+
 
 cmap = colors.ListedColormap(
     [
@@ -245,7 +252,7 @@ def preprocess_data_generator(challenges: Dict[str, Any], solutions: Dict[str, A
         yield task_id, img_pairs, seq_pairs
 
 
-from arc_agi_grid_env import ArcAgiGridEnv
+from RL_ARC_AGI.env.arc_agi_grid_env import ArcAgiGridEnv
 from shape_color_predictor import get_candidates_from_target, predict_candidates_from_task_id
 
 def load_challenges_and_solutions(
@@ -393,24 +400,8 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
                     # Fill only the size_candidate area with empty_val (11)
                     self._current_grid_img[0:height, 150:150+width] = empty_val
                 else:
-                    # Randomly initialize some cells in size_candidate area with correct answers
-                    target_solution = self._target_grid_img[0:height, 150:150+width]
-                    current_solution = np.full((height, width), empty_val)  # Start with empty
-                    
-                    # Randomly fill some percentage of correct answers
-                    fill_ratio = np.random.uniform(0.2, 0.7)  # 20%-70% pre-filled
-                    total_cells = height * width
-                    num_filled = int(total_cells * fill_ratio)
-                    
-                    # Get random positions to fill
-                    positions = [(i, j) for i in range(height) for j in range(width)]
-                    filled_positions = np.random.choice(len(positions), num_filled, replace=False)
-                    
-                    for pos_idx in filled_positions:
-                        i, j = positions[pos_idx]
-                        current_solution[i, j] = target_solution[i, j]
-                    
-                    self._current_grid_img[0:height, 150:150+width] = current_solution
+                    randomize_part_of_solution(self._target_grid_img, self._current_grid_img, self.active_shape, 
+                                                empty_val=empty_val, fill_ratio_range=(0.2, 0.7))
             else:
                 # Fill only the size_candidate area with empty_val (11)
                 self._current_grid_img[0:height, 150:150+width] = empty_val 
@@ -704,91 +695,3 @@ def create_arc_env_coord(
                                 task_id,
                                 pair_idx,)
     return wrapped_env
-
-
-def action_converter(action: int) -> dict:
-    # 0 ~ 899: color 0
-    # 900 ~ 1799: color 1
-    # 1800 ~ 2699: color 2
-    # 2700 ~ 3599: color 3
-    # 3600 ~ 4499: color 4
-    # 4500 ~ 5399: color 5
-    # 5400 ~ 6299: color 6
-    # 6300 ~ 7199: color 7
-    # 7200 ~ 8099: color 8
-    # 8100 ~ 8999: color 9
-    # 9000 ~ 9899: color 10
-    assert (action >= 0 and action < 9900)
-    color = action // 900
-    row = (action - 900*color) // 30
-    col = (action - 900*color) % 30
-    coordinate = (row, col)
-    dict_action = {'color': color, 
-                   'coordinate': coordinate}
-    return dict_action
-    
-
-def vectorized_action_converter(actions: torch.Tensor) -> dict:
-    """벡터화된 함수 (텐서용)"""
-    # 입력 검증
-    assert torch.all((actions >= 0) & (actions < 9900)), "All actions must be in range [0, 9900)"
-    
-    # 벡터화된 계산
-    # color = action // 900
-    colors = torch.div(actions, 900, rounding_mode='floor')
-    
-    # remainder = action - 900 * color  
-    remainders = actions - 900 * colors
-    
-    # row = remainder // 30
-    rows = torch.div(remainders, 30, rounding_mode='floor')
-    
-    # col = remainder % 30
-    cols = remainders % 30
-    
-    # 결과를 딕셔너리로 반환
-    result = {
-        'color': colors.numpy(),
-        'coordinate': torch.stack([rows, cols], dim=-1).numpy()  # (N, 2) 형태
-    }
-    return result
-
-
-def convert_dict_to_int(dict_action: dict,
-                        ) -> int:
-    """
-    딕셔너리 액션을 정수 액션으로 변환하는 벡터화된 함수
-    Args:
-        dict_actions: {
-            'color': numpy array or torch.Tensor of shape (,),
-            'coordinate': numpy array or torch.Tensor of shape (2,)
-        }
-    Returns:
-        np.ndarray: 정수 액션들 (N,)
-    """
-    color = dict_action['color']
-    coordinate = dict_action['coordinate']
-    int_action = color * 900 + coordinate[0]*30 + coordinate[1]
-    return int_action
-
-
-def vectorized_convert_dict_to_int(dict_actions: dict) -> np.ndarray:
-    """
-    딕셔너리 액션들을 정수 액션들로 변환하는 벡터화된 함수
-    Args:
-        dict_actions: {
-            'color': numpy array or torch.Tensor of shape (N,),
-            'coordinate': numpy array or torch.Tensor of shape (N, 2)
-        }
-    Returns:
-        np.ndarray: 정수 액션들 (N,)
-    """
-    colors = dict_actions['color']
-    coordinates = dict_actions['coordinate']
-    
-    # 벡터화된 계산: int_action = color * 900 + row * 30 + col
-    # coordinates는 (N, 2) 형태이므로 coordinates[:, 0]이 row, coordinates[:, 1]이 col
-    rows = coordinates[:, 0]
-    cols = coordinates[:, 1]
-    int_actions = colors * 900 + rows * 30 + cols
-    return int_actions

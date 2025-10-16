@@ -1,6 +1,6 @@
 # %%
 import gymnasium as gym 
-from arc_agi_grid_env_coord import ArcAgiGridEnvCoord, \
+from env.arc_agi_grid_env_coord import ArcAgiGridEnvCoord, \
                                     ArcAgiWrapper, \
                                     create_arc_env_coord, \
                                     load_challenges_and_solutions, \

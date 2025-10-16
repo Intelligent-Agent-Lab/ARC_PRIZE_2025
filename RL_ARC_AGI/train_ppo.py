@@ -12,14 +12,14 @@ from omegaconf import DictConfig, OmegaConf
 import wandb
 import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
-from arc_agi_grid_env import create_arc_env
-from arc_agi_grid_env_coord import action_converter
+from env.arc_agi_grid_env import create_arc_env
+from env.arc_agi_grid_env_coord import action_converter
 
 # Add current directory to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Import our modules
-from arc_agi_grid_env_coord import ArcAgiGridEnvCoord, create_arc_env_coord, \
+from env.arc_agi_grid_env_coord import ArcAgiGridEnvCoord, create_arc_env_coord, \
                                     action_converter, \
                                     load_challenges_and_solutions, \
                                     preprocess_data
