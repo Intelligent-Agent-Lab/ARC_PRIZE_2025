@@ -1,2 +1,0 @@
-from .dataset_counting_polygons_blank import DatasetCountingPolygonsBlank, DatasetCountingPolygonsBlankCfg
-from .dataset_counting_polygons_ffhq import DatasetCountingPolygonsFFHQ, DatasetCountingPolygonsFFHQCfg

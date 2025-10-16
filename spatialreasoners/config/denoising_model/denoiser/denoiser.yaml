@@ -1,3 +1,0 @@
-defaults:
-  - embedding@time_embedding: sinusodial
-  - class_embedding: parameters

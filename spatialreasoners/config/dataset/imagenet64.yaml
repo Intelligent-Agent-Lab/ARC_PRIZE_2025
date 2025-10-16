@@ -1,5 +1,0 @@
-name: imagenet
-root: null
-data_shape: [3, 64, 64]
-subset_size: null
-augment: true
