@@ -13,16 +13,16 @@ import wandb
 import matplotlib.pyplot as plt
 from torch.utils.tensorboard import SummaryWriter
 from env.arc_agi_grid_env import create_arc_env
-from env.arc_agi_grid_env_coord import action_converter
+from env.arc_agi_grid_env_coord import convert_int_to_dict
 
 # Add current directory to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Import our modules
 from env.arc_agi_grid_env_coord import ArcAgiGridEnvCoord, create_arc_env_coord, \
-                                    action_converter, \
                                     load_challenges_and_solutions, \
                                     preprocess_data
+from env.utils import convert_int_to_dict, vectorized_convert_int_to_dict
 from ppo_agent import PPOAgent
 from matplotlib import colors
 from pathlib import Path
@@ -36,7 +36,7 @@ def log_action_details(action_tensor, infos, step_num, max_logs=5):
         
         for env_idx in range(num_envs):
             action_int = action_tensor[env_idx].item()
-            action_dict = action_converter(action_int)
+            action_dict = convert_int_to_dict(action_int)
             
             color = action_dict['color']
             coordinate = action_dict['coordinate']
@@ -288,7 +288,7 @@ class ArcAgiTrainer:
                 action, log_prob, _, value = self.agent.get_action_and_value(obs_tensor, obs_info=obs_info_list)
             
             # Take environment step
-            dict_action = action_converter(action.cpu().item())
+            dict_action = convert_int_to_dict(action.cpu().item())
             next_obs, reward, terminated, truncated, info = self.env.step(dict_action)
             current_info = info  # Update current info for next action
             timestep = info['timestep']
@@ -370,7 +370,7 @@ class ArcAgiTrainer:
                     action = torch.argmax(action_logits, dim=1).item()
                 
                 # Convert integer action to dictionary format
-                dict_action = action_converter(action)
+                dict_action = convert_int_to_dict(action)
                 obs, reward, terminated, truncated, info = self.env.step(dict_action)
                 episode_reward += reward
                 done = terminated or truncated
