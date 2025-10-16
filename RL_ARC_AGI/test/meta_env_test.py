@@ -30,7 +30,7 @@ options = {'mode': 'meta_train',
            'phase': 'train',
            'task_id': '794b24be',
            'pair_idx': 0,
-           'rand_init': False,}
+           'rand_init': True,}
 
 obs, info = env.reset(seed, options)
 # %%
