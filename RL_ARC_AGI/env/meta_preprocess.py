@@ -423,7 +423,7 @@ if __name__ == "__main__":
     print((meta_train_dataset['794b24be']['test_index_map']))
     
     # %%
-    from visualize_arc_agi import ArcAgiVisualizer
+    from RL_ARC_AGI.env.visualize_arc_agi import ArcAgiVisualizer
     visualizer = ArcAgiVisualizer()
     # %%
     task_id = '794b24be'
@@ -455,11 +455,7 @@ if __name__ == "__main__":
     print(len(test_challenges[meta_test_task_id]['train']))
     print(len(test_challenges[meta_test_task_id]['test']))
     print(len(meta_test_dataset[meta_test_task_id]['train_data']))
-    print(len(meta_test_dataset[meta_test_task_id]['train_index_map']))
     print(len(meta_test_dataset[meta_test_task_id]['test_data']))
-    print(len(meta_test_dataset[meta_test_task_id]['test_index_map']))
-    
-    
 
     # %%
     print(meta_train_dataset['794b24be']['train_info'][0])

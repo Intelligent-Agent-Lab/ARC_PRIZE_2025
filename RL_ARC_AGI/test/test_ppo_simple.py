@@ -13,8 +13,8 @@ import torch
 # Add current directory to Python path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from arc_agi_grid_env import ArcAgiGridEnv
-from env_wrappers import create_wrapped_env
+from RL_ARC_AGI.env.arc_agi_grid_env import ArcAgiGridEnv
+from RL_ARC_AGI.env.env_wrappers import create_wrapped_env
 from ppo_agent import PPOAgent
 
 
