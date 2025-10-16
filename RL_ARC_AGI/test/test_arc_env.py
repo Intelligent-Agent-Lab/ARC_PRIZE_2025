@@ -1,6 +1,6 @@
 # %%
 import gymnasium as gym 
-from arc_agi_grid_env import ArcAgiGridEnv, ArcAgiWrapper, create_arc_env
+from RL_ARC_AGI.env.arc_agi_grid_env import ArcAgiGridEnv, ArcAgiWrapper, create_arc_env
 from gymnasium.envs.registration import register, registry
 
 def register_arc_env():
