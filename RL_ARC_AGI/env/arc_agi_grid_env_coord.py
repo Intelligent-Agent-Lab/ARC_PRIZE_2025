@@ -252,7 +252,7 @@ def preprocess_data_generator(challenges: Dict[str, Any], solutions: Dict[str, A
         yield task_id, img_pairs, seq_pairs
 
 
-from RL_ARC_AGI.env.arc_agi_grid_env import ArcAgiGridEnv
+from env.arc_agi_grid_env import ArcAgiGridEnv
 from shape_color_predictor import get_candidates_from_target, predict_candidates_from_task_id
 
 def load_challenges_and_solutions(
