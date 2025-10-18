@@ -1,0 +1,5 @@
+DATASET:
+    dim_image: 30
+    num_channels: 1
+
+

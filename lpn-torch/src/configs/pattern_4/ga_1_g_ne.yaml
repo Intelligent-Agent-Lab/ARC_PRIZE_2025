@@ -1,0 +1,189 @@
+training:
+  seed: 0
+  resume_from_checkpoint: null  # null to start from scratch
+  inference_mode: gradient_ascent  # mean, all, random_search, gradient_ascent
+  inference_kwargs:
+    num_steps: 1
+    lr: 0.1
+    optimizer: adam
+    optimizer_kwargs:
+      b2: 0.9
+    stop_gradient_latent_move: False
+    remove_encoder_latents: True
+  batch_size: 128  # this has to be divisible by gradient_accumulation_steps * num_devices
+  gradient_accumulation_steps: 1  # the higher the slower but the lower memory usage while keeping effective batch size constant
+  total_num_steps: 20000
+  log_every_n_steps: 200  # this has to respect dataset_size >= batch_size * log_every_n_steps
+  eval_every_n_logs: 20  # null to disable eval
+  save_checkpoint_every_n_logs: null  # null to disable checkpointing
+  learning_rate: 4e-4
+  prior_kl_coeff: 1e-4
+  pairwise_kl_coeff: null
+  mixed_precision: False  # if True, it uses bfloat16 for activations (params stay in float32)
+  online_data_augmentation: False
+  task_generator:
+    num_workers: 32
+    num_pairs: 4
+    class: PATTERN
+    pattern_size: 4
+  train_datasets:
+
+
+eval:
+  eval_datasets:
+  test_datasets:
+    - generator: PATTERN
+      task_generator_kwargs:
+        pattern_size: ${training.task_generator.pattern_size}
+      name: pattern_4_mean
+      num_pairs: 4
+      length: 256
+      batch_size: 128
+      num_tasks_to_show: 32
+    - generator: PATTERN
+      task_generator_kwargs:
+        pattern_size: ${training.task_generator.pattern_size}
+      name: pattern_4_ga_1
+      num_pairs: 4
+      length: 256
+      batch_size: 128
+      num_tasks_to_show: 32
+      inference_mode: gradient_ascent
+      inference_kwargs:
+        num_steps: 1
+        lr: 0.1
+        optimizer: adam
+        optimizer_kwargs:
+          b2: 0.9
+    - generator: PATTERN
+      task_generator_kwargs:
+        pattern_size: ${training.task_generator.pattern_size}
+      name: pattern_4_ga_5
+      num_pairs: 4
+      length: 256
+      batch_size: 128
+      num_tasks_to_show: 32
+      inference_mode: gradient_ascent
+      inference_kwargs:
+        num_steps: 5
+        lr: 0.1
+        optimizer: adam
+        optimizer_kwargs:
+          b2: 0.9
+    - generator: PATTERN
+      task_generator_kwargs:
+        pattern_size: ${training.task_generator.pattern_size}
+      name: pattern_4_ga_20
+      num_pairs: 4
+      length: 256
+      batch_size: 128
+      num_tasks_to_show: 32
+      inference_mode: gradient_ascent
+      inference_kwargs:
+        num_steps: 20
+        lr: 0.1
+        optimizer: adam
+        optimizer_kwargs:
+          b2: 0.9
+    - generator: PATTERN
+      task_generator_kwargs:
+        pattern_size: ${training.task_generator.pattern_size}
+      name: pattern_4_ga_100
+      num_pairs: 4
+      length: 256
+      batch_size: 128
+      num_tasks_to_show: 32
+      inference_mode: gradient_ascent
+      inference_kwargs:
+        num_steps: 100
+        lr: 0.1
+        optimizer: adam
+        optimizer_kwargs:
+          b2: 0.9
+    - generator: PATTERN
+      task_generator_kwargs:
+        pattern_size: ${training.task_generator.pattern_size}
+      name: pattern_4_ga_100_*
+      num_pairs: 4
+      length: 256
+      batch_size: 128
+      num_tasks_to_show: 32
+      inference_mode: gradient_ascent
+      inference_kwargs:
+        num_steps: 100
+        lr: 0.1
+        optimizer: adam
+        optimizer_kwargs:
+          b2: 0.9
+        remove_encoder_latents: True
+    - generator: PATTERN
+      task_generator_kwargs:
+        pattern_size: ${training.task_generator.pattern_size}
+      name: pattern_4_rs_25
+      num_pairs: 4
+      length: 256
+      batch_size: 128
+      num_tasks_to_show: 32
+      inference_mode: random_search
+      inference_kwargs:
+        num_samples: 25
+        scale: 0.5
+    - generator: PATTERN
+      task_generator_kwargs:
+        pattern_size: ${training.task_generator.pattern_size}
+      name: pattern_4_rs_250
+      num_pairs: 4
+      length: 256
+      batch_size: 128
+      num_tasks_to_show: 32
+      inference_mode: random_search
+      inference_kwargs:
+        num_samples: 250
+        scale: 0.5
+        scan_batch_size: 25
+    - generator: PATTERN
+      task_generator_kwargs:
+        pattern_size: ${training.task_generator.pattern_size}
+      name: pattern_4_rs_250_*
+      num_pairs: 4
+      length: 256
+      batch_size: 128
+      num_tasks_to_show: 32
+      inference_mode: random_search
+      inference_kwargs:
+        num_samples: 250
+        scale: 0.5
+        scan_batch_size: 25
+        remove_encoder_latents: True
+  json_datasets:
+
+
+encoder_transformer:
+  _target_: src.models.utils.EncoderTransformerConfig
+  max_rows: 10
+  max_cols: 10
+  num_layers: 2
+  transformer_layer:
+    _target_: src.models.utils.TransformerLayerConfig
+    num_heads: 6
+    emb_dim_per_head: 16
+    mlp_dim_factor: 1.0
+    dropout_rate: 0.0
+    attention_dropout_rate: 0.0
+  latent_dim: 32
+  variational: True
+  latent_projection_bias: False
+
+
+decoder_transformer:
+  _target_: src.models.utils.DecoderTransformerConfig
+  max_rows: 10
+  max_cols: 10
+  num_layers: 2
+  transformer_layer:
+    _target_: src.models.utils.TransformerLayerConfig
+    num_heads: 6
+    emb_dim_per_head: 16
+    mlp_dim_factor: 1.0
+    dropout_rate: 0.0
+    attention_dropout_rate: 0.0
