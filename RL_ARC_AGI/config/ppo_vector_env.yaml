@@ -57,8 +57,9 @@ network:
 # Logging and saving configuration
 logging:
   log_interval: 1
-  eval_interval: 100
-  eval_episodes: 10
+  eval_interval: 20  # Evaluate on evaluation set every N iterations
+  eval_num_tasks: 5  # Number of evaluation tasks to sample and evaluate
+  eval_episodes_per_task: 1  # Number of episodes per evaluation task (different pair_idx)
   save_interval: 500
   save_dir: "models/vectorized"
   visualize_period: 2

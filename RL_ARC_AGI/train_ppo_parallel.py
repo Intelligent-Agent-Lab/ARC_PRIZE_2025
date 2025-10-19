@@ -272,6 +272,7 @@ class ArcAgiVectorizedTrainer:
         eval_task_img_dict, _, eval_img_shape_colors, _= preprocess_data(evaluation_challenges, evaluation_solutions)
 
         self.task_id_list = list(self.config.environment.task_id_list)
+        self.eval_task_list = list(eval_task_img_dict.keys())  # Store evaluation task list
         self.seed = self.config.environment.seed
         self.fixed_task = self.config.environment.fixed_task
         self.fixed_pair_idx = self.config.environment.fixed_pair_idx
@@ -639,6 +640,210 @@ class ArcAgiVectorizedTrainer:
             'explained_variance': explained_var
         }
 
+    def evaluate_on_eval_set(self, iteration):
+        """Evaluate the agent on evaluation dataset."""
+        self.agent.eval()
+
+        # Get evaluation config
+        eval_num_tasks = self.config.logging.get('eval_num_tasks', 5)
+        eval_episodes_per_task = self.config.logging.get('eval_episodes_per_task', 2)
+
+        # Sample evaluation tasks
+        num_tasks_to_sample = min(eval_num_tasks, len(self.eval_task_list))
+        sampled_tasks = random.sample(self.eval_task_list, num_tasks_to_sample)
+
+        if self.rank == 0:
+            print(f"\nEvaluating on tasks: {sampled_tasks}")
+
+        eval_returns = []
+        eval_lengths = []
+        eval_successes = []
+        task_results = {}  # Store results per task
+
+        with torch.no_grad():
+            for task_idx, task_id in enumerate(sampled_tasks):
+                task_returns = []
+                task_lengths = []
+                task_successes = []
+
+                if self.rank == 0:
+                    print(f"\n--- Task {task_idx + 1}/{len(sampled_tasks)}: {task_id} ---")
+
+                # Evaluate multiple episodes per task (different pair_idx)
+                for episode_idx in range(eval_episodes_per_task):
+                    # Reset environment in evaluation mode
+                    reset_options = {
+                        'mode': 'evaluation',
+                        'task_id': task_id,
+                        'pair_idx': episode_idx,  # Use different pair_idx for variety
+                        'reset_sol_grid': 'padding',
+                        'size_candidate': self.size_candidate,
+                        'color_candidate': self.color_candidate
+                    }
+
+                    # NOTE: Vectorized env resets all envs with same task_id and pair_idx
+                    # We only use the first environment's result for evaluation
+                    # Create a valid seed (0 to 2^32 - 1)
+                    eval_seed = (self.seed + self.rank + abs(hash(task_id)) + episode_idx * 1000) % (2**32)
+                    obs, infos = self.envs.reset(seed=eval_seed, options=reset_options)
+                    obs = torch.Tensor(obs).to(self.device)
+
+                    # Debug: Print actual task_id from environment
+                    if self.rank == 0:
+                        actual_task_id = self.envs.envs[0].task_id if hasattr(self.envs.envs[0], 'task_id') else 'unknown'
+                        actual_pair_idx = self.envs.envs[0].pair_idx if hasattr(self.envs.envs[0], 'pair_idx') else 'unknown'
+                        print(f"    [DEBUG] Requested: task={task_id}, pair={episode_idx} | Actual: task={actual_task_id}, pair={actual_pair_idx}")
+
+                    ep_return = 0.0
+                    ep_length = 0
+                    done = False
+
+                    current_infos = infos
+
+                    max_steps = 900  # Maximum steps per episode
+                    for step in range(max_steps):
+                        # Select action (greedy, no exploration)
+                        action_logits, _ = self.agent(obs)
+
+                        # Apply action masking
+                        if current_infos is not None:
+                            agent_module = self.agent.module if hasattr(self.agent, 'module') else self.agent
+                            action_mask = agent_module._create_action_mask(obs, current_infos)
+                            action_logits = action_logits + action_mask
+
+                        # Take greedy action (argmax)
+                        action = torch.argmax(action_logits, dim=-1)
+
+                        # Execute action
+                        dict_action = vectorized_action_converter(action.cpu())
+                        next_obs, reward, terminations, truncations, infos = self.envs.step(dict_action)
+
+                        current_infos = infos
+                        obs = torch.Tensor(next_obs).to(self.device)
+
+                        # Only track first environment's metrics
+                        ep_return += reward[0]
+                        ep_length += 1
+                        done = terminations[0] or truncations[0]
+
+                        # Check if first environment is done
+                        if done:
+                            break
+
+                    # Record episode statistics
+                    ep_success = 1.0 if ep_return == 1.0 else 0.0
+
+                    task_returns.append(ep_return)
+                    task_lengths.append(ep_length)
+                    task_successes.append(ep_success)
+
+                    eval_returns.append(ep_return)
+                    eval_lengths.append(ep_length)
+                    eval_successes.append(ep_success)
+
+                    if self.rank == 0:
+                        print(f"  Episode {episode_idx + 1}: Reward={ep_return:.3f}, Length={ep_length:.0f}, Success={ep_success:.0f}")
+
+                    # Visualize the final state (only rank 0, only first episode of each task)
+                    if self.rank == 0 and episode_idx == 0:
+                        print(f"  Saving visualization for task {task_id}...")
+                        self.visualize_eval_result(iteration, task_id, task_idx, episode_idx)
+
+                # Store task results
+                task_results[task_id] = {
+                    'mean_reward': np.mean(task_returns),
+                    'mean_length': np.mean(task_lengths),
+                    'success_rate': np.mean(task_successes)
+                }
+
+                if self.rank == 0:
+                    print(f"  Task {task_id} Summary: Reward={task_results[task_id]['mean_reward']:.3f}, "
+                          f"Length={task_results[task_id]['mean_length']:.1f}, "
+                          f"Success={task_results[task_id]['success_rate']:.3f}")
+
+        # Calculate metrics
+        eval_mean_reward = np.mean(eval_returns) if eval_returns else 0.0
+        eval_mean_length = np.mean(eval_lengths) if eval_lengths else 0.0
+        eval_success_rate = np.mean(eval_successes) if eval_successes else 0.0
+
+        # Aggregate across GPUs if multi-GPU
+        if self.num_devices > 1:
+            metrics_tensor = torch.tensor([eval_mean_reward, eval_mean_length, eval_success_rate],
+                                         dtype=torch.float32, device=self.device)
+            dist.all_reduce(metrics_tensor, op=dist.ReduceOp.AVG)
+            eval_mean_reward = metrics_tensor[0].item()
+            eval_mean_length = metrics_tensor[1].item()
+            eval_success_rate = metrics_tensor[2].item()
+
+        self.agent.train()
+
+        return {
+            'eval_mean_reward': eval_mean_reward,
+            'eval_mean_length': eval_mean_length,
+            'eval_success_rate': eval_success_rate,
+            'task_results': task_results,
+            'sampled_tasks': sampled_tasks
+        }
+
+    def visualize_eval_result(self, iteration, task_id, task_idx, episode_idx):
+        """Visualize evaluation result for a specific task."""
+        try:
+            norm = colors.Normalize(vmin=0, vmax=11)
+
+            # Get grid info from first environment
+            info_dict = self.envs.envs[0]._get_info()
+            target_grid = info_dict['target_grid_img']
+            current_grid = info_dict['current_grid_img']
+
+            # Extract areas
+            test_input_mat = current_grid[:, 120:150]  # Test input area
+            test_sol_current_mat = current_grid[:, 150:]  # Predicted solution
+            test_sol_target_mat = target_grid[:, 150:]  # Ground truth solution
+
+            fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+
+            # Input grid
+            axes[0].imshow(test_input_mat, cmap=cmap, norm=norm)
+            axes[0].set_title(f'Input - Task: {task_id}')
+            axes[0].grid(True, which='both', color='#666666', linewidth=0.5)
+            axes[0].set_xticks([x-0.5 for x in range(1 + test_input_mat.shape[1])])
+            axes[0].set_yticks([x-0.5 for x in range(1 + test_input_mat.shape[0])])
+            axes[0].tick_params(axis='both', color='none', length=0)
+            plt.setp(axes[0], xticklabels=[], yticklabels=[])
+
+            # Predicted grid
+            axes[1].imshow(test_sol_current_mat, cmap=cmap, norm=norm)
+            axes[1].set_title(f'Predicted - Iter {iteration}')
+            axes[1].grid(True, which='both', color='#666666', linewidth=0.5)
+            axes[1].set_xticks([x-0.5 for x in range(1 + test_sol_current_mat.shape[1])])
+            axes[1].set_yticks([x-0.5 for x in range(1 + test_sol_current_mat.shape[0])])
+            axes[1].tick_params(axis='both', color='none', length=0)
+            plt.setp(axes[1], xticklabels=[], yticklabels=[])
+
+            # Target grid (Ground Truth)
+            axes[2].imshow(test_sol_target_mat, cmap=cmap, norm=norm)
+            axes[2].set_title(f'Ground Truth')
+            axes[2].grid(True, which='both', color='#666666', linewidth=0.5)
+            axes[2].set_xticks([x-0.5 for x in range(1 + test_sol_target_mat.shape[1])])
+            axes[2].set_yticks([x-0.5 for x in range(1 + test_sol_target_mat.shape[0])])
+            axes[2].tick_params(axis='both', color='none', length=0)
+            plt.setp(axes[2], xticklabels=[], yticklabels=[])
+
+            plt.tight_layout()
+
+            # Save figure in figures folder (same as training visualizations)
+            figure_path = Path("./figures")
+            figure_path.mkdir(exist_ok=True, parents=True)
+            save_path = figure_path / f'{iteration}_eval_task{task_idx}_{task_id}.png'
+            plt.savefig(save_path)
+            plt.close()
+            print(f"    Visualization saved: {save_path}")
+
+        except Exception as e:
+            import traceback
+            print(f"    Error visualizing eval result: {e}")
+            print(f"    Traceback: {traceback.format_exc()}")
+
     def train(self):
         """Main training loop."""
         if self.rank == 0:
@@ -661,6 +866,7 @@ class ArcAgiVectorizedTrainer:
         first_vis = True
 
         reset_options = {
+            'mode': 'train',
             'size_candidate': self.size_candidate,
             'color_candidate': self.color_candidate
         }
@@ -727,10 +933,10 @@ class ArcAgiVectorizedTrainer:
 
                     # --- Detailed Print Block ---
                     print(f"\nIteration {iteration}/{num_iterations}")
-                    print(f"Global step: {global_step}")
-                    print(f"Global Mean reward: {mean_reward:.3f}")
-                    print(f"Global Mean episode length: {mean_length:.1f}")
-                    print(f"Global Success rate: {success_rate:.3f}")
+                    print(f"Train step: {global_step}")
+                    print(f"Train Mean reward: {mean_reward:.3f}")
+                    print(f"Train Mean episode length: {mean_length:.1f}")
+                    print(f"Train Success rate: {success_rate:.3f}")
                     print(f"SPS: {sps}")
                     print(f"Learning rate: {lr_now:.6f}")
                     
@@ -773,6 +979,34 @@ class ArcAgiVectorizedTrainer:
                         self.tensorboard_writer.add_scalar('losses/clipfrac', agg_training_metrics['clipfrac'], global_step)
                         self.tensorboard_writer.add_scalar('losses/explained_variance', agg_training_metrics['explained_variance'], global_step)
 
+            # Evaluation on evaluation dataset
+            eval_interval = self.config.logging.get('eval_interval', 100)
+            if iteration % eval_interval == 0:
+                if self.rank == 0:
+                    print("\n=== Running Evaluation on Eval Set ===")
+
+                eval_metrics = self.evaluate_on_eval_set(iteration)
+
+                if self.rank == 0:
+                    print(f"\n=== Evaluation Summary ===")
+                    print(f"Eval Mean reward: {eval_metrics['eval_mean_reward']:.3f}")
+                    print(f"Eval Mean episode length: {eval_metrics['eval_mean_length']:.1f}")
+                    print(f"Eval Success rate: {eval_metrics['eval_success_rate']:.3f}")
+
+                    # Log to wandb
+                    if self.config.logging.use_wandb:
+                        wandb.log({
+                            'eval/mean_reward': eval_metrics['eval_mean_reward'],
+                            'eval/mean_length': eval_metrics['eval_mean_length'],
+                            'eval/success_rate': eval_metrics['eval_success_rate']
+                        }, step=global_step)
+
+                    # Log to tensorboard
+                    if self.tensorboard_writer:
+                        self.tensorboard_writer.add_scalar('eval/mean_reward', eval_metrics['eval_mean_reward'], global_step)
+                        self.tensorboard_writer.add_scalar('eval/mean_length', eval_metrics['eval_mean_length'], global_step)
+                        self.tensorboard_writer.add_scalar('eval/success_rate', eval_metrics['eval_success_rate'], global_step)
+
             # --- VISUALIZATION AND CHECKPOINTING (RANK 0 ONLY) ---
             if self.rank == 0:
                 # Visualization
@@ -798,7 +1032,7 @@ class ArcAgiVectorizedTrainer:
                     if current_agg_reward > best_mean_reward:
                         best_mean_reward = current_agg_reward
                         torch.save(model_state, os.path.join(self.config.logging.save_dir, 'best_model.pth'))
-                        print(f"New best model saved! Global mean reward: {best_mean_reward:.3f}")
+                        print(f"New best model saved! Train mean reward: {best_mean_reward:.3f}")
 
         # --- FINALIZATION (RANK 0 ONLY) ---
         if self.rank == 0:

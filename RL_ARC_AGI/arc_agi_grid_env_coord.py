@@ -446,17 +446,6 @@ class ArcAgiGridEnvCoord(ArcAgiGridEnv):
         
         self._current_grid_img[row, 150+col] = color
         self._chosen_grid_img[row, col] += 1
-        
-        # Log grid changes occasionally
-        if hasattr(self, 'step_counter'):
-            self.step_counter += 1
-        else:
-            self.step_counter = 1
-            
-        if self.step_counter % 1000 == 0:  # Log every 1000 steps
-            solution_area = self._current_grid_img[:, 150:]
-            filled_cells = int(np.sum(solution_area != 11))
-            print(f"Step {self.step_counter}: Progress {filled_cells}/16 cells filled")
 
         target_color_img = self._target_grid_img[row, 150+col]
         
@@ -637,28 +626,47 @@ class ArcAgiWrapper(Wrapper):
         self.pair_idx = pair_idx
     
     def reset(self, *args, **kwargs,):
+        # Extract seed if present
+        seed = kwargs.get('seed', None)
+
+        # If options are explicitly provided (e.g., for evaluation), check if it overrides defaults
+        if 'options' in kwargs and kwargs['options'] is not None:
+            provided_options = kwargs['options']
+
+            # If task_id is explicitly provided in options, it's an override (e.g., for evaluation)
+            if 'task_id' in provided_options and provided_options['task_id'] is not None:
+                # Use provided options completely
+                options = provided_options.copy()
+                if 'reset_sol_grid' not in options:
+                    options['reset_sol_grid'] = 'padding'
+                return self.env.reset(seed=seed, options=options)
+
+            # Otherwise, merge with default behavior (e.g., training with extra options)
+            # Fall through to default logic below
+
+        # Default behavior based on fixed_task/fixed_pair_idx
         if self.fixed_task and not self.fixed_pair_idx:
             options = {'mode': 'train',
                     'task_id': self.task_id, # 794b24be, 3cd86f4f
-                    'pair_idx': None, 
+                    'pair_idx': None,
                     'reset_sol_grid': 'padding',}
         elif self.fixed_task and self.fixed_pair_idx:
             options = {'mode': 'train',
                     'task_id': self.task_id, # 794b24be, 3cd86f4f
-                    'pair_idx': self.pair_idx, 
+                    'pair_idx': self.pair_idx,
                     'reset_sol_grid': 'padding',}
         elif not self.fixed_task and self.fixed_pair_idx:
             options = {'mode': 'train',
                     'task_id': None, # 794b24be, 3cd86f4f
-                    'pair_idx': self.pair_idx, 
+                    'pair_idx': self.pair_idx,
                     'reset_sol_grid': 'padding',}
         else:
             options = {'mode': 'train',
                     'task_id': None, # 794b24be, 3cd86f4f
-                    'pair_idx': None, 
+                    'pair_idx': None,
                     'reset_sol_grid': 'padding',}
         # task_id를 항상 포함시켜서 reset 호출
-        return self.env.reset(options=options,)
+        return self.env.reset(seed=seed, options=options)
     
     def __getattr__(self, name):
         """
