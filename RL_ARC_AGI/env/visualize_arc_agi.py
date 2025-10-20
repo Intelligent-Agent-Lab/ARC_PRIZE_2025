@@ -32,9 +32,11 @@ class ArcAgiVisualizer:
         self.norm = norm
 
     def plot_current_grid(self, current_grid_img: np.ndarray, task_id: str, pair_idx: int, w: float = 0.5):
-        """Plot the current state of the grid."""
+        if len(current_grid_img.shape) <= 2:
+            test_sol_current_mat = current_grid_img[:, 90:]
+        else:
+            test_sol_current_mat = current_grid_img[pair_idx, :, 90:]
         fs = 12
-        test_sol_current_mat = current_grid_img[:, 90:]
         plt.imshow(test_sol_current_mat, cmap=self.cmap, norm=self.norm)
         plt.grid(True, which='both', color='lightgrey', linewidth=1.0)
         plt.setp(plt.gcf().get_axes(), xticklabels=[], yticklabels=[])
@@ -50,8 +52,11 @@ class ArcAgiVisualizer:
 
     def plot_target_grid(self, target_grid_img: np.ndarray, task_id: str, pair_idx: int, w: float = 0.5):
         """Plot the target grid."""
+        if len(target_grid_img.shape) <= 2:
+            test_sol_target_mat = target_grid_img[:, 90:]
+        else:
+            test_sol_target_mat = target_grid_img[pair_idx, :, 90:]
         fs = 12
-        test_sol_target_mat = target_grid_img[:, 90:]
         plt.imshow(test_sol_target_mat, cmap=self.cmap, norm=self.norm)
         plt.grid(True, which='both', color='lightgrey', linewidth=1.0)
         plt.setp(plt.gcf().get_axes(), xticklabels=[], yticklabels=[])
