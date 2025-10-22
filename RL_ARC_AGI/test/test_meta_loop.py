@@ -62,6 +62,12 @@ print(adapt_train_envs.envs[2].pair_idx)
 # %%
 obs, info = adapt_train_envs.reset()
 # %%
+obs.shape
+# %%
+info['active_shape']
+# %%
+info['active_color']
+
 
 # %%
 from env.visualize_arc_agi import ArcAgiVisualizer
@@ -75,37 +81,4 @@ target_grid_img
 # %%
 v.plot_target_grid(target_grid_img, '794b24be', pair_idx)
 # %%
-
-# %%
-from env.meta_arc_agi_grid_env_coord import convert_dict_to_int, convert_int_to_dict
-import numpy as np 
-coord_list = np.where(env.active_shape == 1)
-coord_list
-non_mask_coord_lst = list(zip(coord_list[0], coord_list[1]))
-# %%
-
-#  %%
-t = 0
-for coord in non_mask_coord_lst:
-    row = coord[0]
-    col = coord[1]
-    dict_action = {'color': test_sol[row, col],
-            'coordinate': [row, col]
-            }
-    int_action = convert_dict_to_int(dict_action)
-    # if t > 898:
-    #     int_action = env.action_space.sample()
-    #     dict_action = convert_int_to_dict(int_action)
-    #     print(f"last action: {dict_action}")
-    print(dict_action)
-    next_obs, reward, terminated, truncated, info = env.step(int_action)
-    t += 1
-    print(f"timestep {t}: {reward}, {terminated}, {truncated}")
-    total_reward += reward
-    if terminated or truncated: 
-        break
-# %%
-v.plot_current_grid(next_obs, '794b24be', 0)
-
-
-# %%
+ # %%

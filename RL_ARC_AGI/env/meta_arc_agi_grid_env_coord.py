@@ -357,9 +357,9 @@ class SelectedMetaArcAgiGridEnv(gym.Env):
                 reward = 0.05 if color != 10 else 0.01
 
         observation = self._get_obs()
-        info = self._get_info()
         self.episode_returns += reward
         self.episode_lengths += 1
+        info = self._get_info()
         return observation, reward, terminated, truncated, info
 
 
